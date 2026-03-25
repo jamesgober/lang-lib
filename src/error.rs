@@ -22,19 +22,39 @@ pub enum LangError {
         /// The locale that was not found.
         locale: String,
     },
+    /// A locale identifier was rejected before any file access occurred.
+    InvalidLocale {
+        /// The locale that was rejected.
+        locale: String,
+    },
 }
 
 impl fmt::Display for LangError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LangError::Io { locale, cause } => {
-                write!(f, "failed to read language file for '{}': {}", locale, cause)
+                write!(
+                    f,
+                    "failed to read language file for '{}': {}",
+                    locale, cause
+                )
             }
             LangError::Parse { locale, cause } => {
-                write!(f, "failed to parse language file for '{}': {}", locale, cause)
+                write!(
+                    f,
+                    "failed to parse language file for '{}': {}",
+                    locale, cause
+                )
             }
             LangError::NotLoaded { locale } => {
                 write!(f, "locale '{}' has not been loaded", locale)
+            }
+            LangError::InvalidLocale { locale } => {
+                write!(
+                    f,
+                    "locale '{}' is invalid; expected a single locale name without path separators",
+                    locale
+                )
             }
         }
     }

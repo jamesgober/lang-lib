@@ -1,0 +1,4 @@
+app_title = "Panel Acme"
+welcome = "Bienvenido de nuevo"
+save_button = "Guardar cambios"
+network_error = "No pudimos conectarnos al servidor."

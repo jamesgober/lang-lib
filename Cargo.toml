@@ -1,6 +1,6 @@
 [package]
 name        = "lang-lib"
-version     = "0.1.0"
+version     = "1.0.0"
 edition     = "2021"
 readme      = "README.md"
 license     = "Apache-2.0"
@@ -32,8 +32,32 @@ homepage      = "https://github.com/jamesgober/lang-lib"
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = []
+web-example-axum = ["dep:axum", "dep:tokio"]
+web-example-actix = ["dep:actix-web"]
+
 [dependencies]
 toml = "0.8"
+axum = { version = "0.8", optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"], optional = true }
+actix-web = { version = "4", optional = true }
 
 [dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 tempfile = "3"
+
+[[bench]]
+name = "performance"
+path = "benches/performance.rs"
+harness = false
+
+[[example]]
+name = "axum_server"
+path = "examples/axum_server.rs"
+required-features = ["web-example-axum"]
+
+[[example]]
+name = "actix_server"
+path = "examples/actix_server.rs"
+required-features = ["web-example-actix"]

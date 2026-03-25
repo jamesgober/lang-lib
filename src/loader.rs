@@ -1,8 +1,19 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path};
 
 use crate::error::LangError;
+
+fn validate_locale(locale: &str) -> Result<(), LangError> {
+    let mut components = Path::new(locale).components();
+
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => Ok(()),
+        _ => Err(LangError::InvalidLocale {
+            locale: locale.to_string(),
+        }),
+    }
+}
 
 /// Loads a TOML language file from `path/{locale}.toml` and returns a flat
 /// `HashMap<String, String>` of all key-value pairs.
@@ -10,9 +21,11 @@ use crate::error::LangError;
 /// Only string values are accepted. Any non-string value in the TOML file is
 /// silently skipped — this keeps the format simple and predictable.
 pub fn load_file(path: &str, locale: &str) -> Result<HashMap<String, String>, LangError> {
-    let file_path = format!("{}/{}.toml", path, locale);
+    validate_locale(locale)?;
 
-    let raw = fs::read_to_string(Path::new(&file_path)).map_err(|e| LangError::Io {
+    let file_path = Path::new(path).join(format!("{locale}.toml"));
+
+    let raw = fs::read_to_string(&file_path).map_err(|e| LangError::Io {
         locale: locale.to_string(),
         cause: e.to_string(),
     })?;

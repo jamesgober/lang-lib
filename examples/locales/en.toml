@@ -1,0 +1,4 @@
+app_title = "Acme Dashboard"
+welcome = "Welcome back"
+save_button = "Save changes"
+network_error = "We could not reach the server."
