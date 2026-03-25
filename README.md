@@ -1,5 +1,8 @@
 # lang-lib
 
+[![Crates.io](https://img.shields.io/crates/v/lang-lib.svg)](https://crates.io/crates/lang-lib)
+[![Crates.io Downloads](https://img.shields.io/crates/d/lang-lib.svg)](https://crates.io/crates/lang-lib)
+[![Docs.rs](https://docs.rs/lang-lib/badge.svg)](https://docs.rs/lang-lib)
 [![CI](https://github.com/jamesgober/lang-lib/actions/workflows/ci.yml/badge.svg)](https://github.com/jamesgober/lang-lib/actions/workflows/ci.yml)
 [![Benchmarks](https://github.com/jamesgober/lang-lib/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/jamesgober/lang-lib/actions/workflows/benchmarks.yml)
 
