@@ -1,0 +1,39 @@
+[package]
+name        = "lang-lib"
+version     = "0.1.0"
+edition     = "2021"
+readme      = "README.md"
+license     = "Apache-2.0"
+
+authors = [
+    "James Gober <me@jamesgober.com>"
+]
+
+description = "A lightweight, high-performance localization library for Rust. Loads TOML language files, supports runtime locale switching, configurable paths, and automatic fallback chains."
+
+keywords = [
+    "i18n",
+    "localization",
+    "translation",
+    "lang",
+    "internationalization"
+]
+
+categories = [
+    "localization",
+    "rust-patterns"
+]
+
+documentation = "https://docs.rs/lang-lib"
+repository    = "https://github.com/jamesgober/lang-lib"
+homepage      = "https://github.com/jamesgober/lang-lib"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
