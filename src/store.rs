@@ -1,47 +1,69 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{OnceLock, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::borrow::Cow;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+
+use arc_swap::{ArcSwap, Guard};
+use rustc_hash::FxHashMap;
 
 use crate::error::LangError;
+use crate::intern::intern;
 use crate::loader;
 
 // ---------------------------------------------------------------------------
-// Global state
+// Internal state
 // ---------------------------------------------------------------------------
 
+type LocaleMap = FxHashMap<&'static str, &'static str>;
+
 struct LangState {
-    /// Base directory where language files are stored.
-    path: String,
-    /// Active locale used by `t!("key")` with no explicit locale argument.
-    active: String,
-    /// Fallback locale chain. Checked in order when a key is missing.
-    fallbacks: Vec<String>,
-    /// All loaded locales. Each entry maps translation keys to their strings.
-    locales: HashMap<String, HashMap<String, String>>,
+    path: &'static str,
+    active: &'static str,
+    fallbacks: Arc<[&'static str]>,
+    locales: FxHashMap<&'static str, Arc<LocaleMap>>,
 }
 
 impl LangState {
-    fn new() -> Self {
+    fn initial() -> Self {
         Self {
-            path: "locales".to_string(),
-            active: "en".to_string(),
-            fallbacks: vec!["en".to_string()],
-            locales: HashMap::new(),
+            path: "locales",
+            active: "en",
+            fallbacks: Arc::from(["en"].as_slice()),
+            locales: FxHashMap::default(),
         }
     }
 }
 
-static STATE: OnceLock<RwLock<LangState>> = OnceLock::new();
-
-fn state() -> &'static RwLock<LangState> {
-    STATE.get_or_init(|| RwLock::new(LangState::new()))
+impl Clone for LangState {
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path,
+            active: self.active,
+            fallbacks: Arc::clone(&self.fallbacks),
+            locales: self.locales.clone(),
+        }
+    }
 }
 
-fn read_state() -> RwLockReadGuard<'static, LangState> {
-    state().read().unwrap_or_else(PoisonError::into_inner)
+static STATE: OnceLock<ArcSwap<LangState>> = OnceLock::new();
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+fn state() -> &'static ArcSwap<LangState> {
+    STATE.get_or_init(|| ArcSwap::new(Arc::new(LangState::initial())))
 }
 
-fn write_state() -> RwLockWriteGuard<'static, LangState> {
-    state().write().unwrap_or_else(PoisonError::into_inner)
+fn snapshot() -> Guard<Arc<LangState>> {
+    state().load()
+}
+
+fn with_write<F>(mutate: F)
+where
+    F: FnOnce(&mut LangState),
+{
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    let current = state().load_full();
+    let mut next = (*current).clone();
+    mutate(&mut next);
+    state().store(Arc::new(next));
 }
 
 // ---------------------------------------------------------------------------
@@ -50,17 +72,26 @@ fn write_state() -> RwLockWriteGuard<'static, LangState> {
 
 /// The main entry point for configuring and querying the localization system.
 ///
-/// `Lang` manages process-global state behind a read/write lock. Configure it
-/// once during startup, load the locales your application needs, and then use
-/// [`t!`](crate::t) or [`Lang::translate`] wherever translated text is needed.
+/// `Lang` manages process-global state behind a lock-free [`arc_swap::ArcSwap`]
+/// snapshot. Configure it once during startup, load the locales your
+/// application needs, and then use [`t!`](crate::t) or [`Lang::translate`]
+/// wherever translated text is needed.
+///
+/// Concurrent calls to [`Lang::translate`] do not contend on any lock. Write
+/// operations (`set_*`, [`Lang::load`], [`Lang::unload`]) briefly serialize
+/// against each other but never block readers.
 pub struct Lang;
 
 /// A lightweight, request-scoped translation helper.
 ///
-/// `Translator` stores a locale identifier and forwards lookups to the global
-/// [`Lang`] store without mutating the process-wide active locale. This makes
-/// it a good fit for web handlers, jobs, and other code paths where locale is
-/// part of the input rather than part of global application state.
+/// `Translator` stores an interned locale identifier and forwards lookups to
+/// the global [`Lang`] store without mutating the process-wide active locale.
+/// This makes it a good fit for web handlers, jobs, and other code paths
+/// where locale is part of the input rather than part of global application
+/// state.
+///
+/// Cloning a `Translator` is cheap — the locale is held as a `&'static str`,
+/// so the operation is a pointer copy and no allocation occurs.
 ///
 /// # Examples
 ///
@@ -73,36 +104,45 @@ pub struct Lang;
 /// let title = translator.translate_with_fallback("welcome", "Welcome");
 /// assert_eq!(title, "Welcome");
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Translator {
-    locale: String,
+    locale: &'static str,
 }
 
 impl Translator {
     /// Creates a translator bound to a specific locale.
     #[must_use]
-    pub fn new(locale: impl Into<String>) -> Self {
+    pub fn new(locale: impl AsRef<str>) -> Self {
         Self {
-            locale: locale.into(),
+            locale: intern(locale.as_ref()),
         }
     }
 
     /// Returns the locale used by this translator.
     #[must_use]
-    pub fn locale(&self) -> &str {
-        &self.locale
+    pub fn locale(&self) -> &'static str {
+        self.locale
     }
 
     /// Translates a key using this translator's locale.
+    ///
+    /// The returned value borrows directly into the interned translation
+    /// store on the hit path and into `key` on the complete-miss path. Both
+    /// outcomes are zero-allocation.
     #[must_use]
-    pub fn translate(&self, key: &str) -> String {
-        Lang::translate(key, Some(self.locale.as_str()), None)
+    pub fn translate<'a>(&self, key: &'a str) -> Cow<'a, str> {
+        Lang::translate(key, Some(self.locale), None)
     }
 
     /// Translates a key using this translator's locale and an inline fallback.
+    ///
+    /// The returned value borrows directly into the interned translation
+    /// store on the hit path, into `fallback` when the lookup misses, and
+    /// into `key` only if no fallback resolves either. All three outcomes
+    /// are zero-allocation.
     #[must_use]
-    pub fn translate_with_fallback(&self, key: &str, fallback: &str) -> String {
-        Lang::translate(key, Some(self.locale.as_str()), Some(fallback))
+    pub fn translate_with_fallback<'a>(&self, key: &'a str, fallback: &'a str) -> Cow<'a, str> {
+        Lang::translate(key, Some(self.locale), Some(fallback))
     }
 }
 
@@ -118,8 +158,9 @@ impl Lang {
     /// use lang_lib::Lang;
     /// Lang::set_path("assets/lang");
     /// ```
-    pub fn set_path(path: impl Into<String>) {
-        write_state().path = path.into();
+    pub fn set_path(path: impl AsRef<str>) {
+        let interned = intern(path.as_ref());
+        with_write(|state| state.path = interned);
     }
 
     /// Returns the current language file path.
@@ -133,8 +174,8 @@ impl Lang {
     /// assert_eq!(Lang::path(), "assets/locales");
     /// ```
     #[must_use]
-    pub fn path() -> String {
-        read_state().path.clone()
+    pub fn path() -> &'static str {
+        snapshot().path
     }
 
     /// Sets the active locale used when no locale is specified in `t!`.
@@ -153,8 +194,9 @@ impl Lang {
     /// use lang_lib::Lang;
     /// Lang::set_locale("es");
     /// ```
-    pub fn set_locale(locale: impl Into<String>) {
-        write_state().active = locale.into();
+    pub fn set_locale(locale: impl AsRef<str>) {
+        let interned = intern(locale.as_ref());
+        with_write(|state| state.active = interned);
     }
 
     /// Returns the currently active locale.
@@ -168,8 +210,8 @@ impl Lang {
     /// assert_eq!(Lang::locale(), "fr");
     /// ```
     #[must_use]
-    pub fn locale() -> String {
-        read_state().active.clone()
+    pub fn locale() -> &'static str {
+        snapshot().active
     }
 
     /// Sets the fallback locale chain.
@@ -184,8 +226,11 @@ impl Lang {
     /// use lang_lib::Lang;
     /// Lang::set_fallbacks(vec!["en".to_string()]);
     /// ```
+    #[allow(clippy::needless_pass_by_value, reason = "preserves 1.0.x signature")]
     pub fn set_fallbacks(chain: Vec<String>) {
-        write_state().fallbacks = chain;
+        let interned: Vec<&'static str> = chain.iter().map(|s| intern(s)).collect();
+        let arc: Arc<[&'static str]> = Arc::from(interned);
+        with_write(|state| state.fallbacks = Arc::clone(&arc));
     }
 
     /// Loads a locale from disk.
@@ -210,11 +255,15 @@ impl Lang {
     /// Lang::load("en").unwrap();
     /// Lang::load("es").unwrap();
     /// ```
-    pub fn load(locale: impl Into<String>) -> Result<(), LangError> {
-        let locale = locale.into();
-        let path = read_state().path.clone();
-        let map = loader::load_file(&path, &locale)?;
-        let _ = write_state().locales.insert(locale, map);
+    pub fn load(locale: impl AsRef<str>) -> Result<(), LangError> {
+        let locale = locale.as_ref();
+        let path = snapshot().path;
+        let map = loader::load_file(path, locale)?;
+        let interned_locale = intern(locale);
+        let arc_map: Arc<LocaleMap> = Arc::new(map);
+        with_write(|state| {
+            let _ = state.locales.insert(interned_locale, Arc::clone(&arc_map));
+        });
         Ok(())
     }
 
@@ -234,10 +283,14 @@ impl Lang {
     ///
     /// Lang::load_from("en", "tests/fixtures/locales").unwrap();
     /// ```
-    pub fn load_from(locale: impl Into<String>, path: &str) -> Result<(), LangError> {
-        let locale = locale.into();
-        let map = loader::load_file(path, &locale)?;
-        let _ = write_state().locales.insert(locale, map);
+    pub fn load_from(locale: impl AsRef<str>, path: &str) -> Result<(), LangError> {
+        let locale = locale.as_ref();
+        let map = loader::load_file(path, locale)?;
+        let interned_locale = intern(locale);
+        let arc_map: Arc<LocaleMap> = Arc::new(map);
+        with_write(|state| {
+            let _ = state.locales.insert(interned_locale, Arc::clone(&arc_map));
+        });
         Ok(())
     }
 
@@ -253,7 +306,7 @@ impl Lang {
     /// ```
     #[must_use]
     pub fn is_loaded(locale: &str) -> bool {
-        read_state().locales.contains_key(locale)
+        snapshot().locales.contains_key(locale)
     }
 
     /// Returns a sorted list of all loaded locale identifiers.
@@ -267,20 +320,26 @@ impl Lang {
     ///
     /// Lang::load_from("es", "tests/fixtures/locales").unwrap();
     /// Lang::load_from("en", "tests/fixtures/locales").unwrap();
-    /// assert_eq!(Lang::loaded(), vec!["en".to_string(), "es".to_string()]);
+    /// assert_eq!(Lang::loaded(), vec!["en", "es"]);
     /// ```
     #[must_use]
-    pub fn loaded() -> Vec<String> {
-        let mut locales: Vec<_> = read_state().locales.keys().cloned().collect();
+    pub fn loaded() -> Vec<&'static str> {
+        let mut locales: Vec<&'static str> = snapshot().locales.keys().copied().collect();
         locales.sort_unstable();
         locales
     }
 
-    /// Unloads a locale and frees its memory.
+    /// Unloads a locale and removes it from the lookup table.
     ///
     /// Unloading a locale does not change the active locale or fallback chain.
-    /// If either of those still references the removed locale, translation will
-    /// simply skip it.
+    /// If either of those still references the removed locale, translation
+    /// will simply skip it.
+    ///
+    /// Note: in `1.1.x`, translation strings are interned into a process-wide
+    /// pool, so unloading a locale removes it from the lookup table but does
+    /// not reclaim the interned bytes themselves. The `1.2.x` hot-reload
+    /// milestone revisits this so long-running reloaders do not grow the
+    /// interner without bound.
     ///
     /// # Examples
     ///
@@ -292,7 +351,9 @@ impl Lang {
     /// assert!(!Lang::is_loaded("en"));
     /// ```
     pub fn unload(locale: &str) {
-        let _ = write_state().locales.remove(locale);
+        with_write(|state| {
+            let _ = state.locales.remove(locale);
+        });
     }
 
     /// Creates a request-scoped [`Translator`] for the provided locale.
@@ -309,7 +370,8 @@ impl Lang {
     /// let translator = Lang::translator("es");
     /// assert_eq!(translator.locale(), "es");
     /// ```
-    pub fn translator(locale: impl Into<String>) -> Translator {
+    #[must_use]
+    pub fn translator(locale: impl AsRef<str>) -> Translator {
         Translator::new(locale)
     }
 
@@ -320,6 +382,13 @@ impl Lang {
     /// 2. Each locale in the fallback chain, in order
     /// 3. The inline `fallback` string if provided
     /// 4. The key itself (never returns an empty string)
+    ///
+    /// The hot path is lock-free and zero-allocation: a hit returns
+    /// [`Cow::Borrowed`] backed by the interned translation store; a miss
+    /// with an inline fallback returns [`Cow::Borrowed`] of the user-supplied
+    /// fallback; a complete miss returns [`Cow::Borrowed`] of the key.
+    /// The returned value derefs to `&str` and works transparently with
+    /// `format!`, `println!`, and equality against `&str`.
     ///
     /// This is the function called by the [`t!`](crate::t) macro. Prefer
     /// using the macro directly in application code.
@@ -337,37 +406,36 @@ impl Lang {
     /// assert_eq!(text, "Welcome");
     /// ```
     #[must_use]
-    pub fn translate(key: &str, locale: Option<&str>, fallback: Option<&str>) -> String {
-        let state = read_state();
+    pub fn translate<'a>(
+        key: &'a str,
+        locale: Option<&'a str>,
+        fallback: Option<&'a str>,
+    ) -> Cow<'a, str> {
+        let state = snapshot();
+        let target: &str = locale.unwrap_or(state.active);
 
-        let target = locale.unwrap_or(&state.active);
-
-        // Check requested locale first
         if let Some(map) = state.locales.get(target) {
-            if let Some(val) = map.get(key) {
-                return val.clone();
+            if let Some(&val) = map.get(key) {
+                return Cow::Borrowed(val);
             }
         }
 
-        // Walk the fallback chain
         let mut seen = HashSet::with_capacity(state.fallbacks.len());
-        for fb_locale in &state.fallbacks {
-            if fb_locale == target || !seen.insert(fb_locale.as_str()) {
+        for &fb_locale in state.fallbacks.iter() {
+            if fb_locale == target || !seen.insert(fb_locale) {
                 continue;
             }
-            if let Some(map) = state.locales.get(fb_locale.as_str()) {
-                if let Some(val) = map.get(key) {
-                    return val.clone();
+            if let Some(map) = state.locales.get(fb_locale) {
+                if let Some(&val) = map.get(key) {
+                    return Cow::Borrowed(val);
                 }
             }
         }
 
-        // Inline fallback
         if let Some(fb) = fallback {
-            return fb.to_string();
+            return Cow::Borrowed(fb);
         }
 
-        // Last resort: return the key itself
-        key.to_string()
+        Cow::Borrowed(key)
     }
 }

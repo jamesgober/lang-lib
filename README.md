@@ -36,7 +36,7 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 - **Multi-Language Support** — Load any number of locales from plain TOML files and switch the active language at runtime. No fixed locale set, no recompile to add one.
 
-- **Zero-Allocation Lookups** — Translation values are stored as shared `Arc<str>` and returned as borrowed `Cow<str>`, so a successful lookup costs zero heap allocations on the hot path.
+- **Zero-Allocation Lookups** — Translation values are interned at load time into a process-wide pool, and every successful lookup returns a `Cow::Borrowed(&'static str)` that points directly into that pool. The hot path costs zero heap allocations. Fallback and key-return paths also avoid allocation by borrowing from the caller's inputs.
 
 - **Lock-Free Reads** — Translation state is swapped atomically via `ArcSwap`. Concurrent lookups never take a lock and never contend, scaling cleanly across cores.
 
@@ -62,7 +62,7 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 ```toml
 [dependencies]
-lang-lib = "1.0.1"
+lang-lib = "1.1.0"
 ```
 
 ## Quick Start

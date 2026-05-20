@@ -1,6 +1,6 @@
 [package]
 name        = "lang-lib"
-version     = "1.0.1"
+version     = "1.1.0"
 edition     = "2024"
 rust-version = "1.85"
 readme      = "README.md"
@@ -39,6 +39,8 @@ web-example-axum = ["dep:axum", "dep:tokio"]
 web-example-actix = ["dep:actix-web"]
 
 [dependencies]
+arc-swap = "1.7"
+rustc-hash = "2"
 toml = "0.8"
 axum = { version = "0.8", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"], optional = true }

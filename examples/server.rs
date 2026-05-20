@@ -50,12 +50,13 @@ fn handle_request(request: &Request) -> Response {
 
     Response {
         locale,
-        title: Lang::translate("app_title", Some(locale), Some("Acme Dashboard")),
-        action: Lang::translate("save_button", Some(locale), Some("Save changes")),
+        title: Lang::translate("app_title", Some(locale), Some("Acme Dashboard")).into_owned(),
+        action: Lang::translate("save_button", Some(locale), Some("Save changes")).into_owned(),
         error: Lang::translate(
             "network_error",
             Some(locale),
             Some("We could not reach the server."),
-        ),
+        )
+        .into_owned(),
     }
 }

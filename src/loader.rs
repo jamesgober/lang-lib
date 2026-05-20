@@ -1,8 +1,10 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path};
 
+use rustc_hash::FxHashMap;
+
 use crate::error::LangError;
+use crate::intern::intern;
 
 fn validate_locale(locale: &str) -> Result<(), LangError> {
     let mut components = Path::new(locale).components();
@@ -16,11 +18,14 @@ fn validate_locale(locale: &str) -> Result<(), LangError> {
 }
 
 /// Loads a TOML language file from `path/{locale}.toml` and returns a flat
-/// `HashMap<String, String>` of all key-value pairs.
+/// map of interned key/value pairs ready for the lookup state.
 ///
 /// Only string values are accepted. Any non-string value in the TOML file is
 /// silently skipped — this keeps the format simple and predictable.
-pub fn load_file(path: &str, locale: &str) -> Result<HashMap<String, String>, LangError> {
+pub(crate) fn load_file(
+    path: &str,
+    locale: &str,
+) -> Result<FxHashMap<&'static str, &'static str>, LangError> {
     validate_locale(locale)?;
 
     let file_path = Path::new(path).join(format!("{locale}.toml"));
@@ -33,21 +38,25 @@ pub fn load_file(path: &str, locale: &str) -> Result<HashMap<String, String>, La
     parse_toml(locale, &raw)
 }
 
-/// Parses a raw TOML string into a flat `HashMap<String, String>`.
+/// Parses a raw TOML string into a flat map of interned key/value pairs.
 ///
 /// Only top-level string values are extracted. Tables, arrays, integers, and
 /// other types are skipped without error.
-pub fn parse_toml(locale: &str, raw: &str) -> Result<HashMap<String, String>, LangError> {
+pub(crate) fn parse_toml(
+    locale: &str,
+    raw: &str,
+) -> Result<FxHashMap<&'static str, &'static str>, LangError> {
     let table: toml::Table = raw.parse().map_err(|e: toml::de::Error| LangError::Parse {
         locale: locale.to_string(),
         cause: e.to_string(),
     })?;
 
-    let mut map = HashMap::with_capacity(table.len());
+    let mut map: FxHashMap<&'static str, &'static str> =
+        FxHashMap::with_capacity_and_hasher(table.len(), rustc_hash::FxBuildHasher);
 
     for (key, value) in table {
         if let toml::Value::String(s) = value {
-            let _ = map.insert(key, s);
+            let _ = map.insert(intern(&key), intern(&s));
         }
     }
 

@@ -100,6 +100,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 mod error;
+mod intern;
 mod loader;
 mod request;
 mod store;

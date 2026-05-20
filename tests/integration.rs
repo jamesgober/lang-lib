@@ -30,7 +30,7 @@ fn test_guard() -> MutexGuard<'static, ()> {
 
 fn reset_lang() {
     for locale in Lang::loaded() {
-        Lang::unload(&locale);
+        Lang::unload(locale);
     }
 
     Lang::set_path("locales");

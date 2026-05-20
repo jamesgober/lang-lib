@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Barrier, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use lang_lib::{Lang, Translator, resolve_accept_language};
@@ -125,12 +127,66 @@ fn bench_translate_complete_miss_key_return(c: &mut Criterion) {
     });
 }
 
+fn bench_translate_hit_concurrent(c: &mut Criterion) {
+    ensure_benchmark_state();
+    let mut group = c.benchmark_group("translate_hit_concurrent");
+
+    for threads in [1_usize, 4, 16, 64] {
+        let id = format!("threads_{threads}");
+        group.bench_function(id, |b| {
+            b.iter_custom(|iterations| {
+                let per_thread = iterations.div_ceil(threads as u64).max(1);
+                let barrier = Arc::new(Barrier::new(threads + 1));
+                let mut handles = Vec::with_capacity(threads);
+
+                for _ in 0..threads {
+                    let barrier = Arc::clone(&barrier);
+                    handles.push(thread::spawn(move || {
+                        let translator = Translator::new("es");
+                        let _ = barrier.wait();
+                        for _ in 0..per_thread {
+                            let value = translator.translate_with_fallback(
+                                black_box("network_error"),
+                                black_box("fallback"),
+                            );
+                            let _ = black_box(value);
+                        }
+                    }));
+                }
+
+                let _ = barrier.wait();
+                let start = Instant::now();
+                for handle in handles {
+                    handle.join().expect("benchmark thread joined");
+                }
+                let elapsed = start.elapsed();
+
+                // iter_custom expects wall time for `iterations` total ops.
+                // Each thread performed `per_thread` ops in parallel, so the
+                // wall-time-per-op-per-thread is `elapsed / per_thread`.
+                // Multiplying by `threads` converts that back to a duration
+                // that, when divided by `iterations`, yields per-thread
+                // per-op latency — the contention metric we care about.
+                Duration::from_nanos(
+                    elapsed
+                        .as_nanos()
+                        .saturating_mul(threads as u128)
+                        .min(u64::MAX as u128) as u64,
+                )
+            });
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     performance_benches,
     bench_resolve_accept_language,
     bench_translate_lookup,
     bench_translate_fallback_chain_miss,
     bench_translate_complete_miss_inline_fallback,
-    bench_translate_complete_miss_key_return
+    bench_translate_complete_miss_key_return,
+    bench_translate_hit_concurrent
 );
 criterion_main!(performance_benches);
