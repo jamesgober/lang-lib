@@ -1,9 +1,10 @@
 [package]
 name        = "lang-lib"
 version     = "1.0.0"
-edition     = "2021"
+edition     = "2024"
+rust-version = "1.75"
 readme      = "README.md"
-license     = "Apache-2.0"
+license     = "Apache-2.0 OR MIT"
 
 authors = [
     "James Gober <me@jamesgober.com>"

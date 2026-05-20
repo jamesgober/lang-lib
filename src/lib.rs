@@ -83,9 +83,21 @@
 //! See `examples/actix_server.rs` for the same pattern using `actix-web`.
 //! Locale names must be a single file stem such as `en`, `en-US`, or `pt_BR`.
 
-#![deny(warnings)]
-#![deny(clippy::all)]
 #![deny(missing_docs)]
+#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(unused_must_use)]
+#![deny(unused_results)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::todo)]
+#![deny(clippy::unimplemented)]
+#![deny(clippy::print_stdout)]
+#![deny(clippy::print_stderr)]
+#![deny(clippy::dbg_macro)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+#![deny(clippy::missing_safety_doc)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
 
 mod error;
 mod loader;

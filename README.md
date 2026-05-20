@@ -1,20 +1,62 @@
-# lang-lib
+<h1 align="center">
+    <img width="99" alt="Rust logo" src="https://raw.githubusercontent.com/jamesgober/rust-collection/72baabd71f00e14aa9184efcb16fa3deddda3a0a/assets/rust-logo.svg">
+    <br>
+    <strong>lang-lib</strong>
+    <br>
+    <sup><sub>TRANSLATION LIBRARY FOR RUST</sub></sup>
+</h1>
 
-[![Crates.io](https://img.shields.io/crates/v/lang-lib.svg)](https://crates.io/crates/lang-lib)
-[![Crates.io Downloads](https://img.shields.io/crates/d/lang-lib.svg)](https://crates.io/crates/lang-lib)
-[![Docs.rs](https://docs.rs/lang-lib/badge.svg)](https://docs.rs/lang-lib)
-[![CI](https://github.com/jamesgober/lang-lib/actions/workflows/ci.yml/badge.svg)](https://github.com/jamesgober/lang-lib/actions/workflows/ci.yml)
-[![Benchmarks](https://github.com/jamesgober/lang-lib/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/jamesgober/lang-lib/actions/workflows/benchmarks.yml)
+<p align="center">
+    <a href="https://crates.io/crates/lang-lib"><img alt="crates.io" src="https://img.shields.io/crates/v/lang-lib.svg"></a>
+    <a href="https://crates.io/crates/lang-lib"><img alt="downloads" src="https://img.shields.io/crates/d/lang-lib.svg?color=0099ff"></a>
+    <a href="https://docs.rs/lang-lib"><img alt="docs.rs" src="https://docs.rs/lang-lib/badge.svg"></a>
+    <a href="https://github.com/rust-lang/rfcs/blob/master/text/2495-min-rust-version.md" title="MSRV"><img alt="MSRV" src="https://img.shields.io/badge/MSRV-1.75%2B-blue"></a>
+    <a href="https://github.com/jamesgober/lang-lib/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jamesgober/lang-lib/actions/workflows/ci.yml/badge.svg"></a>
+</p>
 
-A lightweight, high-performance localization library for Rust.
+<p align="center">
+    <strong>A High-Performance Multi-Language Translation Library for Rust</strong>
+    <br>
+    <sub>FAST + SIMPLE + LIGHTWEIGHT + CONCURRENT + LOCK-FREE + THREAD-SAFE + ROBUST + STABLE</sub>
+</p>
+<br>
 
-Loads TOML language files, supports runtime locale switching, configurable
-paths per project, and automatic fallback chains. No proc macros, no codegen,
-no CLI tooling — just a macro and a map.
+**Language Library**  ( **lang-lib** )  is a file-based **multi-language translation** library for Rust. It loads `TOML` translation files at startup and serves lookups by key, with runtime locale switching and configurable fallback chains. Designed to be simple, fast, lightweight, concurrent, and lock-free, it stays focused on doing one thing well — **translation** — without the weight of a full internationalization framework.
 
-The crate is deliberately small. The goal is not to invent a translation
-platform. The goal is to make it easy to ship a Rust application with readable
-locale files, predictable fallback behavior, and almost no integration cost.
+Setup is **deliberately frictionless**. There's no code generation, no build script, no CLI tooling, and no compile-time macros to wrestle with, just map your language files, call the `t!` macro, and you're translating. Drop your `TOML` files in a directory, point `lang-lib` at it, and every key is available across your application. Add a new language by adding a file; no rebuild step, no schema regeneration, nothing to wire up.
+
+Every part of the API is shaped to reduce the amount of code you write. The `t!` macro handles the common case in a single line, accepts an optional locale override, and takes an inline fallback for missing keys, covering three distinct lookup patterns with one consistent call. For web handlers that need a fixed locale per request, a lightweight Translator wraps the active locale so you call `.translate("key")` without repeating it. No setup objects, no lifecycle management, no plumbing, just the call you actually wanted to make.
+
+A simple, **lightweight** library with a **high-performance**, enterprise-ready core; engineered for **maximum stability** and the **resilience** to thrive under load. Don't let the simplicity fool you: underneath is a heavily-tested, performance-tuned, and fully error-hardened engine.
+**Simplicity**, **stability**, and **high-performance** — together, with **zero compromise**.
+
+<br>
+
+## FEATURES
+
+- **Multi-Language Support** — Load any number of locales from plain TOML files and switch the active language at runtime. No fixed locale set, no recompile to add one.
+
+- **Zero-Allocation Lookups** — Translation values are stored as shared `Arc<str>` and returned as borrowed `Cow<str>`, so a successful lookup costs zero heap allocations on the hot path.
+
+- **Lock-Free Reads** — Translation state is swapped atomically via `ArcSwap`. Concurrent lookups never take a lock and never contend, scaling cleanly across cores.
+
+- **Thread-Safe** — Every public type is `Send + Sync`. Share one translation store across your entire application; call it from any thread without external synchronization.
+
+- **Configurable Fallback Chains** — When a key is missing in the active locale, `lang-lib` walks an ordered fallback list before giving up, so partial translations degrade gracefully instead of breaking.
+
+- **Runtime Locale Switching** — Change the active language on the fly without reloading files or rebuilding state. Ideal for per-request locale selection in web servers.
+
+- **One-Line API** — A single `t!` macro covers the common case, with optional locale and inline-fallback arguments. No translator object to construct, no context to thread through your call stack.
+
+- **No Build Step** — No code generation, no build script, no CLI tooling. Map your language files, call the macro, ship. Adding a language means adding a file.
+
+- **Minimal Dependencies** — A lean dependency graph and a small surface area keep compile times fast and audits simple.
+
+- **Cross-Platform** — Runs identically on Linux, macOS, and Windows.
+
+<br>
+<hr>
+<br>
 
 ## Installation
 
@@ -48,6 +90,8 @@ let msg = t!("unknown_key", fallback: "Oops");         // inline fallback
 let msg = t!("unknown_key", "es", fallback: "Oops");   // locale + fallback
 ```
 
+<br>
+
 ## Tutorial
 
 If you are wiring this into a real application, the usual setup looks like
@@ -64,6 +108,8 @@ your-app/
    |- en.toml
    \- es.toml
 ```
+
+<br>
 
 ### 2. Create language files
 
@@ -94,6 +140,8 @@ Rules that matter:
 - Nested TOML tables and non-string values are ignored.
 - Keep keys stable and descriptive. Treat them like public API for your UI.
 
+<br>
+
 ### 3. Load locales during startup
 
 ```rust
@@ -108,6 +156,8 @@ fn configure_i18n() -> Result<(), lang_lib::LangError> {
 	Ok(())
 }
 ```
+
+<br>
 
 ### 4. Translate where the text is rendered
 
@@ -124,6 +174,8 @@ fn render_login() {
 }
 ```
 
+<br>
+
 ### 5. Run the included example
 
 The repository includes a runnable example wired to sample locale files:
@@ -131,6 +183,8 @@ The repository includes a runnable example wired to sample locale files:
 ```powershell
 cargo run --example basic
 ```
+
+<br>
 
 ## Server-Side Locale Policy
 
@@ -172,6 +226,8 @@ fn render_for_request(header: &str) -> String {
 }
 ```
 
+<br>
+
 ## Accept-Language Helper
 
 If your application already receives an `Accept-Language` header, the crate now
@@ -211,6 +267,8 @@ assert_eq!(locale, "es");
 In plain terms: this version is for cases where your locale list is not a
 hard-coded `&["en", "es"]`, but comes from config or some other runtime data.
 
+<br>
+
 ## Translator Helper
 
 `Translator` is a tiny convenience wrapper around a locale string. It keeps
@@ -232,6 +290,8 @@ fn render_page_via_lang(locale: &str) -> String {
 
 This helper does not change `Lang::locale()`. It only bundles a locale with
 repeated translation calls.
+
+<br>
 
 ## Axum Example
 
@@ -261,6 +321,8 @@ The three server-oriented examples share the same locale bootstrap and
 `Accept-Language` parsing helper, so their behavior stays aligned as the
 examples evolve.
 
+<br>
+
 ## File Format
 
 Plain TOML, one key per string:
@@ -275,6 +337,8 @@ Files are resolved as `{path}/{locale}.toml`.
 Locale identifiers must be simple file stems like `en`, `en-US`, or `pt_BR`.
 Path separators and relative path components are rejected before file access.
 
+<br>
+
 ## API Notes
 
 - `Lang::set_path` changes the base directory used by `Lang::load`.
@@ -286,6 +350,8 @@ Path separators and relative path components are rejected before file access.
 - `Lang::set_fallbacks` controls the order used when a key is missing.
 - `Lang::loaded` returns a sorted list, which is useful for diagnostics.
 
+<br>
+
 ## Fallback Behavior
 
 When a key is not found, lookup proceeds as follows:
@@ -294,6 +360,8 @@ When a key is not found, lookup proceeds as follows:
 2. Each locale in the fallback chain, in order
 3. Inline `fallback:` value if provided in `t!`
 4. The key string itself — never returns empty
+
+<br>
 
 ## Error Handling
 
@@ -318,6 +386,8 @@ match Lang::load("en") {
 	}
 }
 ```
+
+<br>
 
 ## Tips For Production Use
 
@@ -360,6 +430,8 @@ The badges at the top of this README point to the CI and benchmark workflows.
 If they are blank right after adding workflows, trigger the workflows once and
 GitHub will start showing status immediately.
 
+<br>
+
 ## Repository Examples
 
 - `examples/basic.rs`: end-to-end startup and translation flow.
@@ -372,6 +444,25 @@ GitHub will start showing status immediately.
 - `BENCHMARKS.md`: benchmark usage notes, regression guidance, and CI benchmark policy.
 - `benches/performance.rs`: Criterion benchmark for request locale resolution and translation lookup.
 
+<br>
+
 ## License
 
-Apache-2.0 — Copyright © 2026 James Gober
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT License ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+
+<!-- FOOT COPYRIGHT
+################################################# -->
+<div align="center">
+  <h2></h2>
+  <sup>COPYRIGHT <small>&copy;</small> 2026 <strong>JAMES GOBER.</strong></sup>
+</div>
