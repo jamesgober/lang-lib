@@ -36,7 +36,7 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 - **Multi-Language Support** — Load any number of locales from plain TOML files and switch the active language at runtime. No fixed locale set, no recompile to add one.
 
-- **Zero-Allocation Lookups** — Translation values are interned at load time into a process-wide pool, and every successful lookup returns a `Cow::Borrowed(&'static str)` that points directly into that pool. The hot path costs zero heap allocations. Fallback and key-return paths also avoid allocation by borrowing from the caller's inputs.
+- **Zero-Allocation Lookups (default build)** — Translation values are interned at load time into a process-wide pool, and every successful lookup returns a `Cow::Borrowed(&'static str)` that points directly into that pool. The hot path costs zero heap allocations. Fallback and key-return paths also avoid allocation by borrowing from the caller's inputs.
 
 - **Lock-Free Reads** — Translation state is swapped atomically via `ArcSwap`. Concurrent lookups never take a lock and never contend, scaling cleanly across cores.
 
@@ -66,7 +66,7 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 ```toml
 [dependencies]
-lang-lib = "1.2.0"
+lang-lib = "1.3.0"
 ```
 
 Optional features:
@@ -74,10 +74,12 @@ Optional features:
 ```toml
 [dependencies]
 # Subscribe to translation change events via registry-io.
-lang-lib = { version = "1.2.0", features = ["registry"] }
+lang-lib = { version = "1.3.0", features = ["registry"] }
 
 # Watch locale files on disk and reload automatically.
-lang-lib = { version = "1.2.0", features = ["hot-reload"] }
+# Implies `registry`. Switches value storage to Arc<str> so reloaded
+# files no longer leak — the trade-off is one alloc per translate call.
+lang-lib = { version = "1.3.0", features = ["hot-reload"] }
 ```
 
 ## Quick Start
@@ -447,17 +449,24 @@ GitHub will start showing status immediately.
 
 <br>
 
+## Documentation
+
+- [`docs/API.md`](docs/API.md): authoritative API reference — every public item, parameters, return types, examples, and the stability contract.
+- [`docs/PROJECT-GUIDELINES.md`](docs/PROJECT-GUIDELINES.md): production usage patterns, contribution flow, and engineering discipline.
+- [`docs/release-notes/`](docs/release-notes/): per-release notes from `1.0.1` onward.
+- [`BENCHMARKS.md`](BENCHMARKS.md): benchmark usage, methodology, and CI policy.
+
 ## Repository Examples
 
 - `examples/basic.rs`: end-to-end startup and translation flow.
 - `examples/server.rs`: request-scoped locale resolution for server-side code.
-- `examples/axum_server.rs`: real `axum` handler using request-scoped translation.
-- `examples/actix_server.rs`: real `actix-web` handler using the same request-scoped policy.
+- `examples/axum_server.rs`: real `axum` handler using request-scoped translation. (`--features web-example-axum`)
+- `examples/actix_server.rs`: real `actix-web` handler using the same request-scoped policy. (`--features web-example-actix`)
+- `examples/hot_reload.rs`: live filesystem-watcher demo with change-event handler. (`--features hot-reload`)
 - `examples/common/mod.rs`: shared example helper for locale loading and request locale resolution.
 - `examples/locales/en.toml`: sample English locale file.
 - `examples/locales/es.toml`: sample Spanish locale file.
-- `BENCHMARKS.md`: benchmark usage notes, regression guidance, and CI benchmark policy.
-- `benches/performance.rs`: Criterion benchmark for request locale resolution and translation lookup.
+- `benches/performance.rs`: Criterion benchmark suite (single-thread + concurrent).
 
 <br>
 

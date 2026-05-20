@@ -17,8 +17,39 @@ use crate::{
 // ---------------------------------------------------------------------------
 // Internal state
 // ---------------------------------------------------------------------------
+//
+// Translation values use a different storage strategy depending on whether
+// the `hot-reload` feature is enabled:
+//
+// - **Default builds** store values as `&'static str` references handed out
+//   by the leak-based interner. Hit-path returns are
+//   `Cow::Borrowed(&'static str)` — pure pointer copies, no atomics, no
+//   allocation. Memory is never reclaimed; this is correct because the
+//   default build cannot reload locale files at runtime, so the interner
+//   cannot grow after startup.
+//
+// - **`hot-reload` builds** store values as `Arc<str>`. Hit-path returns are
+//   `Cow::Owned(arc.to_string())` — one allocation per call, but reloading
+//   a locale drops the old `Arc<str>` instances cleanly (no leak). The
+//   `Lang::translate_arc` opt-in returns `Arc<str>` directly for callers
+//   that want zero-allocation reads under hot-reload at the cost of
+//   refcount contention under same-key high concurrency.
 
-type LocaleMap = FxHashMap<&'static str, &'static str>;
+/// Value-storage type used inside the per-locale map.
+///
+/// `&'static str` in default builds (interner-backed, zero-alloc returns);
+/// `Arc<str>` in `hot-reload` builds (reclaims on reload).
+#[cfg(not(feature = "hot-reload"))]
+pub(crate) type StoredValue = &'static str;
+
+/// Value-storage type used inside the per-locale map.
+///
+/// `&'static str` in default builds (interner-backed, zero-alloc returns);
+/// `Arc<str>` in `hot-reload` builds (reclaims on reload).
+#[cfg(feature = "hot-reload")]
+pub(crate) type StoredValue = Arc<str>;
+
+type LocaleMap = FxHashMap<&'static str, StoredValue>;
 
 struct LangState {
     path: &'static str,
@@ -148,6 +179,30 @@ impl Translator {
     #[must_use]
     pub fn translate_with_fallback<'a>(&self, key: &'a str, fallback: &'a str) -> Cow<'a, str> {
         Lang::translate(key, Some(self.locale), Some(fallback))
+    }
+
+    /// Translates a key, returning the value as an `Arc<str>`.
+    ///
+    /// Available when the `hot-reload` feature is enabled. Forwards to
+    /// [`Lang::translate_arc`] with this translator's locale. See that
+    /// method's documentation for the contention trade-off.
+    #[cfg(feature = "hot-reload")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "hot-reload")))]
+    #[must_use]
+    pub fn translate_arc(&self, key: &str) -> Arc<str> {
+        Lang::translate_arc(key, Some(self.locale), None)
+    }
+
+    /// Translates a key with an inline fallback, returning the value as an
+    /// `Arc<str>`.
+    ///
+    /// Available when the `hot-reload` feature is enabled. Forwards to
+    /// [`Lang::translate_arc`] with this translator's locale.
+    #[cfg(feature = "hot-reload")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "hot-reload")))]
+    #[must_use]
+    pub fn translate_arc_with_fallback(&self, key: &str, fallback: &str) -> Arc<str> {
+        Lang::translate_arc(key, Some(self.locale), Some(fallback))
     }
 }
 
@@ -545,8 +600,8 @@ impl Lang {
         let target: &str = locale.unwrap_or(state.active);
 
         if let Some(map) = state.locales.get(target) {
-            if let Some(&val) = map.get(key) {
-                return Cow::Borrowed(val);
+            if let Some(val) = map.get(key) {
+                return stored_to_cow(val);
             }
         }
 
@@ -556,8 +611,8 @@ impl Lang {
                 continue;
             }
             if let Some(map) = state.locales.get(fb_locale) {
-                if let Some(&val) = map.get(key) {
-                    return Cow::Borrowed(val);
+                if let Some(val) = map.get(key) {
+                    return stored_to_cow(val);
                 }
             }
         }
@@ -568,4 +623,76 @@ impl Lang {
 
         Cow::Borrowed(key)
     }
+
+    /// Translates a key, returning the value as an `Arc<str>`.
+    ///
+    /// Available when the `hot-reload` feature is enabled. The hit path is
+    /// zero-allocation (a refcount bump on the existing `Arc<str>`); the
+    /// miss paths allocate a fresh `Arc<str>` from the caller-supplied
+    /// fallback or key.
+    ///
+    /// Use this when you want to avoid the per-call `String` allocation
+    /// imposed by `Lang::translate` in `hot-reload` builds. Be aware that
+    /// high concurrency on the same translation key can produce refcount
+    /// cache-line contention; if you suspect this is biting you, measure
+    /// and switch back to [`Lang::translate`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # #[cfg(feature = "hot-reload")]
+    /// # fn demo() {
+    /// use lang_lib::Lang;
+    ///
+    /// let value = Lang::translate_arc("greeting", Some("en"), None);
+    /// println!("{value}");
+    /// # }
+    /// ```
+    #[cfg(feature = "hot-reload")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "hot-reload")))]
+    #[must_use]
+    pub fn translate_arc(key: &str, locale: Option<&str>, fallback: Option<&str>) -> Arc<str> {
+        let state = snapshot();
+        let target: &str = locale.unwrap_or(state.active);
+
+        if let Some(map) = state.locales.get(target) {
+            if let Some(val) = map.get(key) {
+                return Arc::clone(val);
+            }
+        }
+
+        let mut seen = HashSet::with_capacity(state.fallbacks.len());
+        for &fb_locale in state.fallbacks.iter() {
+            if fb_locale == target || !seen.insert(fb_locale) {
+                continue;
+            }
+            if let Some(map) = state.locales.get(fb_locale) {
+                if let Some(val) = map.get(key) {
+                    return Arc::clone(val);
+                }
+            }
+        }
+
+        Arc::from(fallback.unwrap_or(key))
+    }
+}
+
+/// Coerces the per-feature `StoredValue` into a `Cow<'a, str>`.
+///
+/// Default build: pure pointer copy — the borrow's `'static` lifetime
+/// coerces to `'a` via covariance. Zero allocation.
+///
+/// `hot-reload` build: allocates a new `String` from the `Arc<str>`'s
+/// bytes. Avoids touching the `Arc`'s refcount, so there is no contention
+/// when the same key is read from many threads simultaneously.
+#[cfg(not(feature = "hot-reload"))]
+#[inline]
+fn stored_to_cow<'a>(val: &StoredValue) -> Cow<'a, str> {
+    Cow::Borrowed(*val)
+}
+
+#[cfg(feature = "hot-reload")]
+#[inline]
+fn stored_to_cow<'a>(val: &StoredValue) -> Cow<'a, str> {
+    Cow::Owned(val.as_ref().to_owned())
 }

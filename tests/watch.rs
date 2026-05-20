@@ -103,6 +103,57 @@ fn watcher_picks_up_file_changes_and_fires_reloaded() {
 }
 
 #[test]
+fn hot_reload_storage_drops_arc_str_on_reload() {
+    // This test pins down the v1.3.0 reclaim guarantee: under the
+    // `hot-reload` feature, translation values are `Arc<str>` and the old
+    // copies are released when the locale is reloaded. We probe the
+    // refcount of an Arc<str> retrieved before the reload — after the
+    // reload, only our local handle should remain.
+    let _guard = test_guard();
+    reset_lang();
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_locale(&dir, "reclaim_a", "greeting = \"v1\"");
+    let path_str = dir.path().to_str().expect("utf8 path").to_owned();
+    Lang::set_path(path_str.clone());
+    Lang::load("reclaim_a").expect("load");
+
+    // Grab the current Arc<str>. The store holds one reference; we now
+    // hold a second via translate_arc's refcount bump.
+    let held: std::sync::Arc<str> = Lang::translate_arc("greeting", Some("reclaim_a"), None);
+    assert_eq!(held.as_ref(), "v1");
+    assert!(
+        std::sync::Arc::strong_count(&held) >= 2,
+        "expected the store and the local handle to both reference the Arc"
+    );
+
+    // Now reload with new content. The store should drop its reference to
+    // the old Arc<str>; only our `held` reference keeps "v1" alive.
+    write_locale(&dir, "reclaim_a", "greeting = \"v2\"");
+    Lang::load_from("reclaim_a", &path_str).expect("reload");
+
+    // The store now points at a different Arc<str> entirely.
+    let next: std::sync::Arc<str> = Lang::translate_arc("greeting", Some("reclaim_a"), None);
+    assert_eq!(next.as_ref(), "v2");
+
+    // Our original `held` Arc must NOT share storage with the new value.
+    assert!(
+        !std::sync::Arc::ptr_eq(&held, &next),
+        "reload should produce a distinct Arc<str> backing the value"
+    );
+
+    // The original Arc's refcount should be 1 — only our `held` remains.
+    // (The store dropped its reference when the new value replaced the
+    // entry.)
+    assert_eq!(
+        std::sync::Arc::strong_count(&held),
+        1,
+        "after reload, the only remaining reference to the old Arc<str> \
+         should be the local `held` handle; the store reclaimed its copy"
+    );
+}
+
+#[test]
 fn unwatch_stops_event_delivery() {
     let _guard = test_guard();
     reset_lang();

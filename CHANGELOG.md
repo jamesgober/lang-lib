@@ -9,6 +9,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [1.3.0] - 2026-05-20
+
+REPS-compliance release: closes the append-only-interner growth issue
+introduced when `hot-reload` shipped in `1.2.0`. Adds a comprehensive
+documentation pass and a new opt-in `translate_arc` API.
+
+### The memory-safety fix
+
+The string interner that backs the zero-allocation read path in
+`1.1.0` and `1.2.0` only allocates safely because the default build
+cannot reload locale files at runtime — the interner grows once at
+startup and stays bounded by the count of unique strings in your
+locale files. Under the `hot-reload` feature added in `1.2.0`, that
+assumption no longer held: every reload that introduced fresh strings
+would leak permanently.
+
+`1.3.0` resolves this by making the value-storage strategy
+*compile-time conditional* on the `hot-reload` feature:
+
+| Build       | Value storage         | Hit-path return                       | Reclaims on reload? |
+|-------------|-----------------------|----------------------------------------|---------------------|
+| Default     | Interned `&'static str` | `Cow::Borrowed(&'static str)` — zero alloc | N/A (no reloads)    |
+| `hot-reload` | `Arc<str>`            | `Cow::Owned(String)` — one alloc       | **Yes.**            |
+
+Default builds keep their zero-allocation reads. `hot-reload` builds
+trade one allocation per call for clean memory lifecycle. Both modes
+remain lock-free and `Send + Sync`.
+
+### Added
+
+- **`Lang::translate_arc(key, locale, fallback) -> Arc<str>`** —
+  available when `hot-reload` is enabled. Zero-allocation opt-in
+  alternative to `Lang::translate`; the hit path is a refcount bump
+  on the underlying `Arc<str>`. Use this when you've measured the
+  per-call `String` allocation as a hot spot and same-key contention
+  is not expected to spike. Returns a fresh `Arc<str>` (one alloc) on
+  miss paths.
+- **`Translator::translate_arc(&self, key)` and `Translator::translate_arc_with_fallback`** —
+  mirror the new `Lang::translate_arc` on the request-scoped helper.
+- **`tests/watch.rs::hot_reload_storage_drops_arc_str_on_reload`** —
+  explicit refcount-probe test that verifies an `Arc<str>` retrieved
+  before a reload has only the local handle outstanding after the
+  reload, proving the store dropped its reference cleanly.
+- **`docs/API.md`** — full API reference, previously empty. Mirrors
+  the format of `pipe-io`'s `docs/API.md`: every public item, every
+  parameter, every return type, multiple worked examples, a feature
+  matrix, a stability statement, and a memory-model section.
+- **`docs/PROJECT-GUIDELINES.md`** — production usage patterns,
+  contribution flow, and engineering discipline. Previously empty.
+
+### Changed
+
+- **Internal value-storage layer split.** New private type alias
+  `StoredValue = &'static str` (default) or `Arc<str>` (`hot-reload`),
+  plumbed through `src/loader.rs` and `src/store.rs`. Public API
+  shape is unchanged: `Lang::translate` still returns `Cow<'a, str>`.
+- **Loader interns values only in default builds.** Under
+  `hot-reload`, the parsed TOML `String` is moved into a fresh
+  `Arc<str>` instead of leaked. Keys, locale identifiers, the
+  configured path, and fallback chain entries continue to be
+  interned in both builds (their cardinality is bounded by the
+  developer-defined surface, not by reload churn).
+- **`BENCHMARKS.md`** documents the new `translate_hit_concurrent`
+  bench and the concurrency stress tests added in `1.1.0` /
+  `1.2.0`.
+- **`README.md`** clarifies the dual-storage trade-off in the
+  optional-features install snippet, adds a Documentation section
+  pointing at `docs/API.md` and `docs/PROJECT-GUIDELINES.md`, and
+  notes the `examples/hot_reload.rs` example explicitly.
+
+### Removed
+
+- Nothing.
+
+### Fixed
+
+- **Append-only interner growth under `hot-reload`.** Reloading
+  `<locale>.toml` files no longer leaks the old string values into
+  a process-wide pool that never shrinks. This was the headline
+  caveat of `1.2.0`; with `1.3.0` enabled `hot-reload` is genuinely
+  REPS-compliant on memory.
+
+### Compatibility
+
+No breakage. The public API is source-compatible with `1.2.0`:
+
+- `Lang::translate` still returns `Cow<'a, str>`. The variant that
+  comes back differs by build (`Cow::Borrowed` in default,
+  `Cow::Owned` under `hot-reload`), but anything that worked on a
+  `Cow<'_, str>` in `1.2.0` continues to work in `1.3.0`.
+- `Translator` is still `Copy`; the locale field is still a
+  `&'static str`.
+- All `1.2.0` feature flags retain their `1.2.0` behavior. The new
+  `translate_arc` methods are additive and gated on `hot-reload`.
+
+### Migration from 1.2.0
+
+Just bump the version:
+
+```toml
+[dependencies]
+lang-lib = "1.3.0"
+```
+
+If you're using `hot-reload` and want to avoid the new per-call
+`String` allocation on the hit path, opt into `translate_arc`:
+
+```rust,ignore
+let value: std::sync::Arc<str> = Lang::translate_arc("greeting", Some("en"), None);
+println!("{value}");
+```
+
+Be aware: `translate_arc`'s zero-alloc hit path comes with refcount
+cache-line contention if the same key is read from many threads
+simultaneously. The default `translate` returns `Cow::Owned` on
+hits, which trades one allocation for contention-free reads.
+
 ## [1.2.0] - 2026-05-20
 
 Hot-reload milestone. Two new opt-in features:
@@ -238,7 +355,8 @@ existing call sites and the public API are identical to `1.0.0`.
 - Added benchmark guidance and CI notes to make performance regressions easier to spot
 - Added workflow badges and a health-signals note in the README for quick status visibility
 
-[Unreleased]: https://github.com/jamesgober/lang-lib/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/jamesgober/lang-lib/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.3.0
 [1.2.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.2.0
 [1.1.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.1.0
 [1.0.1]: https://github.com/jamesgober/lang-lib/releases/tag/v1.0.1
