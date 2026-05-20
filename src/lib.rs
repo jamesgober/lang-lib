@@ -99,15 +99,30 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+#[cfg(feature = "registry")]
+mod change;
 mod error;
 mod intern;
 mod loader;
+#[cfg(feature = "registry")]
+mod registry;
 mod request;
 mod store;
+#[cfg(feature = "hot-reload")]
+mod watch;
 
+#[cfg(feature = "registry")]
+#[cfg_attr(docsrs, doc(cfg(feature = "registry")))]
+pub use change::{ChangeKind, LangChangeEvent};
 pub use error::LangError;
+#[cfg(feature = "registry")]
+#[cfg_attr(docsrs, doc(cfg(feature = "registry")))]
+pub use registry_io::HandlerId;
 pub use request::{resolve_accept_language, resolve_accept_language_owned};
 pub use store::{Lang, Translator};
+#[cfg(feature = "hot-reload")]
+#[cfg_attr(docsrs, doc(cfg(feature = "hot-reload")))]
+pub use watch::WatchError;
 
 /// Translates a key using the active locale.
 ///

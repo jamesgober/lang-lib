@@ -1,6 +1,6 @@
 [package]
 name        = "lang-lib"
-version     = "1.1.0"
+version     = "1.2.0"
 edition     = "2024"
 rust-version = "1.85"
 readme      = "README.md"
@@ -35,6 +35,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
+# Subscribe to translation-state change events via registry-io.
+registry = ["dep:registry-io"]
+# Watch the locales directory on disk and reload automatically when files
+# change. Implies `registry` so consumers can react to reload events.
+hot-reload = ["dep:notify", "registry"]
 web-example-axum = ["dep:axum", "dep:tokio"]
 web-example-actix = ["dep:actix-web"]
 
@@ -42,6 +47,8 @@ web-example-actix = ["dep:actix-web"]
 arc-swap = "1.7"
 rustc-hash = "2"
 toml = "0.8"
+notify = { version = "6", optional = true }
+registry-io = { version = "1", optional = true }
 axum = { version = "0.8", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"], optional = true }
 actix-web = { version = "4", optional = true }
@@ -64,3 +71,8 @@ required-features = ["web-example-axum"]
 name = "actix_server"
 path = "examples/actix_server.rs"
 required-features = ["web-example-actix"]
+
+[[example]]
+name = "hot_reload"
+path = "examples/hot_reload.rs"
+required-features = ["hot-reload"]

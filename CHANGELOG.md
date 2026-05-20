@@ -9,6 +9,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [1.2.0] - 2026-05-20
+
+Hot-reload milestone. Two new opt-in features:
+
+- **`registry`** — wires `lang-lib` to `registry-io 1.0`. Install handlers
+  via `Lang::on_change` that fire whenever a locale is loaded, reloaded,
+  or unloaded. Sub-microsecond dispatch per handler; panics in one
+  handler do not affect siblings.
+- **`hot-reload`** — implies `registry`. Adds `Lang::watch` /
+  `Lang::unwatch`, which subscribe to filesystem events on the locales
+  directory and atomically reload changed `<locale>.toml` files.
+  Cross-platform (inotify / FSEvents / ReadDirectoryChangesW via the
+  `notify` crate). Per-file events are debounced (~150 ms) so
+  atomic-rename writes coalesce into a single reload.
+
+### Added
+- `registry` feature flag — pulls in `registry-io = "1"`.
+- `hot-reload` feature flag — pulls in `notify = "6"` (implies `registry`).
+- `lang_lib::LangChangeEvent` and `lang_lib::ChangeKind` (`registry`
+  feature). Re-exported `registry_io::HandlerId` for ergonomic typing.
+- `lang_lib::WatchError` (`hot-reload` feature).
+- `Lang::on_change(handler) -> HandlerId` and
+  `Lang::off_change(id) -> bool` (`registry` feature).
+- `Lang::watch(dir)` and `Lang::unwatch()` (`hot-reload` feature).
+- `tests/registry.rs` — five tests covering Loaded / Reloaded / Unloaded
+  emission, no-op unload, and `off_change` stop semantics.
+- `tests/watch.rs` — two smoke tests covering the round-trip
+  modify→event→reload cycle and `unwatch` clean-up.
+- `examples/hot_reload.rs` — a runnable demo of the watcher feeding live
+  changes into `t!`.
+- README features bullet for hot-reload / change notifications and an
+  optional-features install snippet.
+
+### Changed
+- CI `actions/upload-artifact@v4` → `@v7` to follow the Node 20 → Node 24
+  GitHub Actions deprecation.
+- CI quality matrix now exercises `--no-default-features`,
+  `--features registry`, and `cargo check --example hot_reload --features
+  hot-reload` to keep feature combinations honest.
+
+### Internal
+- `src/change.rs` — `LangChangeEvent` + `ChangeKind` types.
+- `src/registry.rs` — singleton `OnceLock<Arc<SyncRegistry<LangChangeEvent>>>`
+  with private `emit()` helper.
+- `src/watch.rs` — `notify::RecommendedWatcher` + dedicated worker thread
+  with `HashMap<PathBuf, Instant>` debounce table and `Mutex<Option<…>>`
+  singleton state.
+
+### Migration
+
+No code changes required for callers of `1.1.0` who do not opt in to
+either feature. The default-feature surface is unchanged.
+
+To adopt the new features:
+
+```toml
+[dependencies]
+lang-lib = { version = "1.2.0", features = ["hot-reload"] }
+```
+
+```rust
+let handler_id = Lang::on_change(|event| {
+    println!("{:?} on {}", event.kind, event.locale);
+});
+Lang::watch("locales")?;
+// ... application runs ...
+Lang::unwatch();
+let _ = Lang::off_change(handler_id);
+```
+
 ## [1.1.0] - 2026-05-20
 
 The performance release. Both `1.0.x` bottlenecks are eliminated and the
@@ -168,7 +238,8 @@ existing call sites and the public API are identical to `1.0.0`.
 - Added benchmark guidance and CI notes to make performance regressions easier to spot
 - Added workflow badges and a health-signals note in the README for quick status visibility
 
-[Unreleased]: https://github.com/jamesgober/lang-lib/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/jamesgober/lang-lib/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.2.0
 [1.1.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.1.0
 [1.0.1]: https://github.com/jamesgober/lang-lib/releases/tag/v1.0.1
 [1.0.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.0.0

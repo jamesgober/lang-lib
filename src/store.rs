@@ -8,6 +8,11 @@ use rustc_hash::FxHashMap;
 use crate::error::LangError;
 use crate::intern::intern;
 use crate::loader;
+#[cfg(feature = "registry")]
+use crate::{
+    change::{ChangeKind, LangChangeEvent},
+    registry::emit,
+};
 
 // ---------------------------------------------------------------------------
 // Internal state
@@ -261,8 +266,19 @@ impl Lang {
         let map = loader::load_file(path, locale)?;
         let interned_locale = intern(locale);
         let arc_map: Arc<LocaleMap> = Arc::new(map);
+        #[cfg(feature = "registry")]
+        let was_present = snapshot().locales.contains_key(interned_locale);
         with_write(|state| {
             let _ = state.locales.insert(interned_locale, Arc::clone(&arc_map));
+        });
+        #[cfg(feature = "registry")]
+        emit(LangChangeEvent {
+            locale: interned_locale,
+            kind: if was_present {
+                ChangeKind::Reloaded
+            } else {
+                ChangeKind::Loaded
+            },
         });
         Ok(())
     }
@@ -288,8 +304,19 @@ impl Lang {
         let map = loader::load_file(path, locale)?;
         let interned_locale = intern(locale);
         let arc_map: Arc<LocaleMap> = Arc::new(map);
+        #[cfg(feature = "registry")]
+        let was_present = snapshot().locales.contains_key(interned_locale);
         with_write(|state| {
             let _ = state.locales.insert(interned_locale, Arc::clone(&arc_map));
+        });
+        #[cfg(feature = "registry")]
+        emit(LangChangeEvent {
+            locale: interned_locale,
+            kind: if was_present {
+                ChangeKind::Reloaded
+            } else {
+                ChangeKind::Loaded
+            },
         });
         Ok(())
     }
@@ -351,9 +378,18 @@ impl Lang {
     /// assert!(!Lang::is_loaded("en"));
     /// ```
     pub fn unload(locale: &str) {
+        #[cfg(feature = "registry")]
+        let was_present = snapshot().locales.contains_key(locale);
         with_write(|state| {
             let _ = state.locales.remove(locale);
         });
+        #[cfg(feature = "registry")]
+        if was_present {
+            emit(LangChangeEvent {
+                locale: intern(locale),
+                kind: ChangeKind::Unloaded,
+            });
+        }
     }
 
     /// Creates a request-scoped [`Translator`] for the provided locale.
@@ -373,6 +409,100 @@ impl Lang {
     #[must_use]
     pub fn translator(locale: impl AsRef<str>) -> Translator {
         Translator::new(locale)
+    }
+
+    /// Registers a handler that fires whenever the translation store
+    /// changes.
+    ///
+    /// Handlers fire inline on the thread that produced the change (the
+    /// writer, or the watcher thread when `hot-reload` is enabled). The
+    /// dispatch is lock-free and panic-isolating; a panic in one handler
+    /// does not stop sibling handlers.
+    ///
+    /// Returns a [`registry_io::HandlerId`] that can be passed to
+    /// [`Lang::off_change`] to deregister the handler.
+    ///
+    /// Available when the `registry` feature is enabled.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # #[cfg(feature = "registry")]
+    /// # fn demo() {
+    /// use lang_lib::Lang;
+    ///
+    /// let id = Lang::on_change(|event| {
+    ///     println!("{:?} on {}", event.kind, event.locale);
+    /// });
+    /// let _ = Lang::off_change(id);
+    /// # }
+    /// ```
+    #[cfg(feature = "registry")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "registry")))]
+    pub fn on_change<F>(handler: F) -> registry_io::HandlerId
+    where
+        F: Fn(&LangChangeEvent) + Send + Sync + 'static,
+    {
+        crate::registry::registry().register(handler)
+    }
+
+    /// Deregisters a change-event handler previously installed via
+    /// [`Lang::on_change`].
+    ///
+    /// Returns `true` if a handler with the given id was removed.
+    ///
+    /// Available when the `registry` feature is enabled.
+    #[cfg(feature = "registry")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "registry")))]
+    #[must_use = "off_change returns whether a handler was actually removed"]
+    pub fn off_change(id: registry_io::HandlerId) -> bool {
+        crate::registry::registry().unregister(id)
+    }
+
+    /// Starts watching the given directory for `<locale>.toml` changes.
+    ///
+    /// File modifications, atomic-rename writes, and creates are detected
+    /// and debounced into a single per-file reload. Each successful reload
+    /// fires a [`crate::LangChangeEvent`] through the shared registry
+    /// (`registry` feature is implied by `hot-reload`).
+    ///
+    /// Only one watcher may be active per process. Call [`Lang::unwatch`]
+    /// before starting a new one.
+    ///
+    /// Available when the `hot-reload` feature is enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::WatchError::Io`] if the watcher cannot subscribe
+    /// to filesystem events, or [`crate::WatchError::AlreadyRunning`] if
+    /// a watcher is already active.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # #[cfg(feature = "hot-reload")]
+    /// # fn demo() -> Result<(), lang_lib::WatchError> {
+    /// use lang_lib::Lang;
+    /// Lang::watch("locales")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "hot-reload")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "hot-reload")))]
+    pub fn watch(dir: impl AsRef<std::path::Path>) -> Result<(), crate::WatchError> {
+        crate::watch::start(dir.as_ref().to_path_buf())
+    }
+
+    /// Stops the active filesystem watcher, if any.
+    ///
+    /// Idempotent: calling [`Lang::unwatch`] when no watcher is running is
+    /// a no-op.
+    ///
+    /// Available when the `hot-reload` feature is enabled.
+    #[cfg(feature = "hot-reload")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "hot-reload")))]
+    pub fn unwatch() {
+        crate::watch::stop();
     }
 
     /// Translates a key.

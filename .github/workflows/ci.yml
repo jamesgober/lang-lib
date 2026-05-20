@@ -69,3 +69,12 @@ jobs:
 
       - name: Check actix-web example
         run: cargo check --example actix_server --features web-example-actix
+
+      - name: Check hot-reload example
+        run: cargo check --example hot_reload --features hot-reload
+
+      - name: Test with no default features
+        run: cargo test --no-default-features
+
+      - name: Test with only registry feature
+        run: cargo test --no-default-features --features registry

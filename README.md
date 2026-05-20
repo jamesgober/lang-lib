@@ -54,6 +54,10 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 - **Cross-Platform** — Runs identically on Linux, macOS, and Windows.
 
+- **Hot Reload (opt-in)** — Enable the `hot-reload` feature to subscribe to filesystem events on your locales directory; edits to `<locale>.toml` are debounced and atomically reloaded in place, with `registry-io`-powered change-event notifications wired into [`Lang::on_change`].
+
+- **Change Notifications (opt-in)** — Enable the `registry` feature to install handlers via [`Lang::on_change`] that fire whenever a locale is loaded, reloaded, or unloaded. Sub-microsecond dispatch overhead per handler.
+
 <br>
 <hr>
 <br>
@@ -62,7 +66,18 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 ```toml
 [dependencies]
-lang-lib = "1.1.0"
+lang-lib = "1.2.0"
+```
+
+Optional features:
+
+```toml
+[dependencies]
+# Subscribe to translation change events via registry-io.
+lang-lib = { version = "1.2.0", features = ["registry"] }
+
+# Watch locale files on disk and reload automatically.
+lang-lib = { version = "1.2.0", features = ["hot-reload"] }
 ```
 
 ## Quick Start
