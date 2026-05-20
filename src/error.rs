@@ -33,27 +33,18 @@ impl fmt::Display for LangError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LangError::Io { locale, cause } => {
-                write!(
-                    f,
-                    "failed to read language file for '{}': {}",
-                    locale, cause
-                )
+                write!(f, "failed to read language file for '{locale}': {cause}")
             }
             LangError::Parse { locale, cause } => {
-                write!(
-                    f,
-                    "failed to parse language file for '{}': {}",
-                    locale, cause
-                )
+                write!(f, "failed to parse language file for '{locale}': {cause}")
             }
             LangError::NotLoaded { locale } => {
-                write!(f, "locale '{}' has not been loaded", locale)
+                write!(f, "locale '{locale}' has not been loaded")
             }
             LangError::InvalidLocale { locale } => {
                 write!(
                     f,
-                    "locale '{}' is invalid; expected a single locale name without path separators",
-                    locale
+                    "locale '{locale}' is invalid; expected a single locale name without path separators"
                 )
             }
         }

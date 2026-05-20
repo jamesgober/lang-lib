@@ -47,7 +47,7 @@ pub fn parse_toml(locale: &str, raw: &str) -> Result<HashMap<String, String>, La
 
     for (key, value) in table {
         if let toml::Value::String(s) = value {
-            map.insert(key, s);
+            let _ = map.insert(key, s);
         }
     }
 

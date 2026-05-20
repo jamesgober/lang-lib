@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{OnceLock, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::error::LangError;
 use crate::loader;
@@ -37,15 +37,11 @@ fn state() -> &'static RwLock<LangState> {
 }
 
 fn read_state() -> RwLockReadGuard<'static, LangState> {
-    state()
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    state().read().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn write_state() -> RwLockWriteGuard<'static, LangState> {
-    state()
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    state().write().unwrap_or_else(PoisonError::into_inner)
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +80,7 @@ pub struct Translator {
 
 impl Translator {
     /// Creates a translator bound to a specific locale.
+    #[must_use]
     pub fn new(locale: impl Into<String>) -> Self {
         Self {
             locale: locale.into(),
@@ -91,16 +88,19 @@ impl Translator {
     }
 
     /// Returns the locale used by this translator.
+    #[must_use]
     pub fn locale(&self) -> &str {
         &self.locale
     }
 
     /// Translates a key using this translator's locale.
+    #[must_use]
     pub fn translate(&self, key: &str) -> String {
         Lang::translate(key, Some(self.locale.as_str()), None)
     }
 
     /// Translates a key using this translator's locale and an inline fallback.
+    #[must_use]
     pub fn translate_with_fallback(&self, key: &str, fallback: &str) -> String {
         Lang::translate(key, Some(self.locale.as_str()), Some(fallback))
     }
@@ -132,6 +132,7 @@ impl Lang {
     /// Lang::set_path("assets/locales");
     /// assert_eq!(Lang::path(), "assets/locales");
     /// ```
+    #[must_use]
     pub fn path() -> String {
         read_state().path.clone()
     }
@@ -166,6 +167,7 @@ impl Lang {
     /// Lang::set_locale("fr");
     /// assert_eq!(Lang::locale(), "fr");
     /// ```
+    #[must_use]
     pub fn locale() -> String {
         read_state().active.clone()
     }
@@ -212,7 +214,7 @@ impl Lang {
         let locale = locale.into();
         let path = read_state().path.clone();
         let map = loader::load_file(&path, &locale)?;
-        write_state().locales.insert(locale, map);
+        let _ = write_state().locales.insert(locale, map);
         Ok(())
     }
 
@@ -235,7 +237,7 @@ impl Lang {
     pub fn load_from(locale: impl Into<String>, path: &str) -> Result<(), LangError> {
         let locale = locale.into();
         let map = loader::load_file(path, &locale)?;
-        write_state().locales.insert(locale, map);
+        let _ = write_state().locales.insert(locale, map);
         Ok(())
     }
 
@@ -249,6 +251,7 @@ impl Lang {
     /// Lang::load_from("en", "tests/fixtures/locales").unwrap();
     /// assert!(Lang::is_loaded("en"));
     /// ```
+    #[must_use]
     pub fn is_loaded(locale: &str) -> bool {
         read_state().locales.contains_key(locale)
     }
@@ -266,6 +269,7 @@ impl Lang {
     /// Lang::load_from("en", "tests/fixtures/locales").unwrap();
     /// assert_eq!(Lang::loaded(), vec!["en".to_string(), "es".to_string()]);
     /// ```
+    #[must_use]
     pub fn loaded() -> Vec<String> {
         let mut locales: Vec<_> = read_state().locales.keys().cloned().collect();
         locales.sort_unstable();
@@ -288,7 +292,7 @@ impl Lang {
     /// assert!(!Lang::is_loaded("en"));
     /// ```
     pub fn unload(locale: &str) {
-        write_state().locales.remove(locale);
+        let _ = write_state().locales.remove(locale);
     }
 
     /// Creates a request-scoped [`Translator`] for the provided locale.
@@ -332,6 +336,7 @@ impl Lang {
     /// let text = Lang::translate("welcome", Some("en"), Some("Welcome"));
     /// assert_eq!(text, "Welcome");
     /// ```
+    #[must_use]
     pub fn translate(key: &str, locale: Option<&str>, fallback: Option<&str>) -> String {
         let state = read_state();
 

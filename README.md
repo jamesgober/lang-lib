@@ -10,7 +10,7 @@
     <a href="https://crates.io/crates/lang-lib"><img alt="crates.io" src="https://img.shields.io/crates/v/lang-lib.svg"></a>
     <a href="https://crates.io/crates/lang-lib"><img alt="downloads" src="https://img.shields.io/crates/d/lang-lib.svg?color=0099ff"></a>
     <a href="https://docs.rs/lang-lib"><img alt="docs.rs" src="https://docs.rs/lang-lib/badge.svg"></a>
-    <a href="https://github.com/rust-lang/rfcs/blob/master/text/2495-min-rust-version.md" title="MSRV"><img alt="MSRV" src="https://img.shields.io/badge/MSRV-1.75%2B-blue"></a>
+    <a href="https://github.com/rust-lang/rfcs/blob/master/text/2495-min-rust-version.md" title="MSRV"><img alt="MSRV" src="https://img.shields.io/badge/MSRV-1.85%2B-blue"></a>
     <a href="https://github.com/jamesgober/lang-lib/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jamesgober/lang-lib/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
@@ -62,7 +62,7 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 ```toml
 [dependencies]
-lang-lib = "1.0.0"
+lang-lib = "1.0.1"
 ```
 
 ## Quick Start

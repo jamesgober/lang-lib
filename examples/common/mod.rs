@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use lang_lib::{resolve_accept_language, Lang};
+use lang_lib::{Lang, resolve_accept_language};
 
 pub const DEFAULT_LOCALE: &str = "en";
 pub const SUPPORTED_LOCALES: &[&str] = &["en", "es"];

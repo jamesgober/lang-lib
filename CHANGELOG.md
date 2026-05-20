@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [1.0.1] - 2026-05-20
+
+Portfolio standard compliance and REPS lint discipline. No behavior changes;
+existing call sites and the public API are identical to `1.0.0`.
+
+### Added
+- Dual licensing under `Apache-2.0 OR MIT`. `LICENSE` renamed to
+  `LICENSE-APACHE`; `LICENSE-MIT` added.
+- Canonical `REPS.md` at the repo root (Rust Efficiency & Performance Standards).
+- `.dev/PROMPT.md`, `.dev/DIRECTIVES.md`, `.dev/ROADMAP.md` — project context,
+  engineering directives, and the production roadmap to `1.2.0`.
+- `.dev/release/v1.0.1.md` — internal release notes for this patch.
+- `docs/release-notes/v1.0.1.md` — public release note.
+- `rustfmt.toml`, `clippy.toml` — portfolio-standard tooling configuration.
+
+### Changed
+- `Cargo.toml`: edition bumped from `2021` to `2024`.
+- `Cargo.toml`: MSRV declared as `rust-version = "1.85"` (required by edition
+  2024). Previously undeclared.
+- `Cargo.toml`: license changed from `Apache-2.0` to `Apache-2.0 OR MIT`.
+- `src/lib.rs`: lint configuration upgraded from `#![deny(warnings)]
+  #![deny(clippy::all)]` to the full REPS discipline (deny `unwrap_used`,
+  `expect_used`, `todo`, `unimplemented`, `print_stdout`, `print_stderr`,
+  `dbg_macro`, `undocumented_unsafe_blocks`, `missing_safety_doc`; warn
+  `pedantic`).
+- `README.md`: MSRV badge updated to `1.85+`; dual-license footer; install
+  snippet bumped to `1.0.1`.
+
+### Fixed
+- CI manifest-parse failure: `rust-version = "1.75"` was incompatible with
+  `edition = "2024"` (which requires Rust ≥ 1.85). MSRV bumped to `1.85` to
+  match edition 2024 requirements.
+
 ## [1.0.0] - 2026-03-25
 
 ### Added
@@ -47,5 +80,6 @@ No unreleased changes yet.
 - Added benchmark guidance and CI notes to make performance regressions easier to spot
 - Added workflow badges and a health-signals note in the README for quick status visibility
 
-[Unreleased]: https://github.com/jamesgober/lang-lib/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jamesgober/lang-lib/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/jamesgober/lang-lib/releases/tag/v1.0.1
 [1.0.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.0.0

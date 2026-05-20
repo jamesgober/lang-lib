@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use lang_lib::{t, Lang};
+use lang_lib::{Lang, t};
 
 fn main() -> Result<(), lang_lib::LangError> {
     let locale_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/locales");

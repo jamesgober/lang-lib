@@ -1,4 +1,4 @@
-use actix_web::{get, http::header, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{App, HttpRequest, HttpResponse, HttpServer, Responder, get, http::header, web};
 use lang_lib::Translator;
 
 #[path = "common/mod.rs"]

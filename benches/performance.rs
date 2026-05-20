@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use lang_lib::{resolve_accept_language, Lang, Translator};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use lang_lib::{Lang, Translator, resolve_accept_language};
 
 const EN_LOCALE: &str = r#"
 app_title = "Acme Dashboard"

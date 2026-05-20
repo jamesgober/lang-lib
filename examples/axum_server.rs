@@ -1,8 +1,8 @@
 use axum::{
-    extract::State,
-    http::{header::ACCEPT_LANGUAGE, HeaderMap},
-    routing::get,
     Router,
+    extract::State,
+    http::{HeaderMap, header::ACCEPT_LANGUAGE},
+    routing::get,
 };
 use lang_lib::Translator;
 

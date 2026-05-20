@@ -102,9 +102,7 @@ fn resolve_accept_language_impl<'a>(
         }
     }
 
-    best_match
-        .map(|(locale, _, _, _)| locale)
-        .unwrap_or(default_locale)
+    best_match.map_or(default_locale, |(locale, _, _, _)| locale)
 }
 
 /// Resolves an `Accept-Language` header against a supported locale list.
@@ -129,6 +127,7 @@ fn resolve_accept_language_impl<'a>(
 ///
 /// assert_eq!(locale, "es");
 /// ```
+#[must_use]
 pub fn resolve_accept_language<'a>(
     header: &str,
     supported_locales: &[&'a str],

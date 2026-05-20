@@ -1,4 +1,4 @@
-use lang_lib::{resolve_accept_language, resolve_accept_language_owned, t, Lang, Translator};
+use lang_lib::{Lang, Translator, resolve_accept_language, resolve_accept_language_owned, t};
 use std::io::Write;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use tempfile::TempDir;
