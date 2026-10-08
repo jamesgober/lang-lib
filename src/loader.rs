@@ -64,7 +64,7 @@ pub(crate) fn parse_toml(
 
     for (key, value) in table {
         if let toml::Value::String(s) = value {
-            let _ = map.insert(intern(&key), value_from_string(s));
+            let _ = map.insert(intern(&key), value_from_string(&s));
         }
     }
 
@@ -78,8 +78,8 @@ pub(crate) fn parse_toml(
 /// be dropped when the locale is reloaded or unloaded.
 #[cfg(not(feature = "hot-reload"))]
 #[inline]
-fn value_from_string(s: String) -> StoredValue {
-    intern(&s)
+fn value_from_string(s: &str) -> StoredValue {
+    intern(s)
 }
 
 /// Converts a parsed TOML string into the active `StoredValue` representation.
@@ -89,6 +89,6 @@ fn value_from_string(s: String) -> StoredValue {
 /// be dropped when the locale is reloaded or unloaded.
 #[cfg(feature = "hot-reload")]
 #[inline]
-fn value_from_string(s: String) -> StoredValue {
+fn value_from_string(s: &str) -> StoredValue {
     std::sync::Arc::from(s)
 }

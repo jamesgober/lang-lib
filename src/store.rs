@@ -687,6 +687,10 @@ impl Lang {
 /// when the same key is read from many threads simultaneously.
 #[cfg(not(feature = "hot-reload"))]
 #[inline]
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "same signature as the hot-reload variant, where StoredValue is Arc<str>"
+)]
 fn stored_to_cow<'a>(val: &StoredValue) -> Cow<'a, str> {
     Cow::Borrowed(*val)
 }
