@@ -1,6 +1,6 @@
 # lang-lib - API Reference
 
-> Authoritative reference for the public API of `lang-lib 1.3.0`.
+> Authoritative reference for the public API of `lang-lib 1.3.1`.
 > Mirrors the rustdoc on docs.rs. The surface listed here is **stable**;
 > see [Stability](#stability) below for the guarantee.
 
@@ -545,7 +545,7 @@ impl From<notify::Error>  for WatchError { /* ... */ }
 | `registry`            | off     | Adds `Lang::on_change` / `Lang::off_change` and the `LangChangeEvent` / `ChangeKind` / `HandlerId` re-exports. Pulls in `registry-io = "1"`. |
 | `hot-reload`          | off     | Implies `registry`. Adds `Lang::watch` / `Lang::unwatch` and `WatchError`. **Changes the value-storage strategy from interner (`&'static str`) to `Arc<str>`** so reloaded files do not leak. Pulls in `notify = "6"`. |
 | `web-example-axum`    | off     | Compiles the `axum_server` example. Pulls in `axum` and `tokio`.                                |
-| `web-example-actix`   | off     | Compiles the `actix_server` example. Pulls in `actix-web`.                                      |
+| `web-example-actix`   | off     | No effect since 1.3.1; kept so existing builds keep working. The actix-web example is the standalone crate `examples/web-actix` (`cargo run --manifest-path examples/web-actix/Cargo.toml`), so lang-lib never depends on `actix-web`. |
 
 ## MSRV
 

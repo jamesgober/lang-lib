@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/examples/web-actix/target/
 **/*.rs.bk
 Cargo.lock
 

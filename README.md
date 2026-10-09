@@ -66,7 +66,7 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 ```toml
 [dependencies]
-lang-lib = "1.3.0"
+lang-lib = "1.3.1"
 ```
 
 Optional features:
@@ -74,12 +74,12 @@ Optional features:
 ```toml
 [dependencies]
 # Subscribe to translation change events via registry-io.
-lang-lib = { version = "1.3.0", features = ["registry"] }
+lang-lib = { version = "1.3.1", features = ["registry"] }
 
 # Watch locale files on disk and reload automatically.
 # Implies `registry`. Switches value storage to Arc<str> so reloaded
 # files no longer leak — the trade-off is one alloc per translate call.
-lang-lib = { version = "1.3.0", features = ["hot-reload"] }
+lang-lib = { version = "1.3.1", features = ["hot-reload"] }
 ```
 
 ## Quick Start
@@ -328,10 +328,12 @@ curl http://127.0.0.1:3000/
 curl -H "Accept-Language: es-ES,es;q=0.9" http://127.0.0.1:3000/
 ```
 
-If you prefer `actix-web`, the repository includes a matching example:
+If you prefer `actix-web`, the repository includes a matching example. It is a
+small crate of its own, so `actix-web` never enters lang-lib's dependency tree,
+and it needs Rust 1.88 or newer:
 
 ```powershell
-cargo run --example actix_server --features web-example-actix
+cargo run --manifest-path examples/web-actix/Cargo.toml
 ```
 
 The three server-oriented examples share the same locale bootstrap and
@@ -461,7 +463,7 @@ GitHub will start showing status immediately.
 - `examples/basic.rs`: end-to-end startup and translation flow.
 - `examples/server.rs`: request-scoped locale resolution for server-side code.
 - `examples/axum_server.rs`: real `axum` handler using request-scoped translation. (`--features web-example-axum`)
-- `examples/actix_server.rs`: real `actix-web` handler using the same request-scoped policy. (`--features web-example-actix`)
+- `examples/web-actix/`: real `actix-web` handler using the same request-scoped policy, as a standalone crate. (`cargo run --manifest-path examples/web-actix/Cargo.toml`, Rust 1.88+)
 - `examples/hot_reload.rs`: live filesystem-watcher demo with change-event handler. (`--features hot-reload`)
 - `examples/common/mod.rs`: shared example helper for locale loading and request locale resolution.
 - `examples/locales/en.toml`: sample English locale file.

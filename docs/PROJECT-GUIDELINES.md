@@ -113,7 +113,7 @@ Every pull request must pass:
 - `cargo test --all-features` (60+ tests)
 - `cargo doc --no-deps --all-features` with `RUSTDOCFLAGS="-D warnings"`
 - `cargo bench --bench performance --no-run`
-- All four example checks (`server`, `axum_server`, `actix_server`, `hot_reload`)
+- All four example checks (`server`, `axum_server`, `hot_reload`, and the standalone `examples/web-actix` crate)
 - `cargo test --no-default-features`
 - `cargo test --no-default-features --features registry`
 

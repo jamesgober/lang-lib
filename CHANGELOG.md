@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [1.3.1] - 2026-10-09
+
+Dependency hygiene. No API or behavior changes in the library.
+
+### Security
+- `actix-web` is no longer an optional dependency of lang-lib. It was only
+  there to build the actix-web example behind the `web-example-actix`
+  feature, and it brought in `time` 0.3.45 (RUSTSEC-2026-0009) and `h2`
+  0.3.27 (RUSTSEC-2026-0258). With the dependency gone, no feature of
+  lang-lib can pull them in, and `cargo audit` is clean.
+
+### Changed
+- The actix-web example moved from `examples/actix_server.rs` to a small
+  standalone crate, `examples/web-actix`, that depends on lang-lib by path.
+  Run it with `cargo run --manifest-path examples/web-actix/Cargo.toml`.
+  The example disables actix-web's `http2` feature (it serves plain
+  HTTP/1.1, so `h2` is not built) and uses a patched `time`, which needs
+  Rust 1.88. That requirement applies to the example only; lang-lib's
+  MSRV stays 1.85.
+- `web-example-actix` is kept as an empty feature so existing
+  `--features web-example-actix` invocations keep working. It no longer
+  enables anything.
+- CI checks the example crate (fmt, clippy, build) on stable, and a new
+  MSRV job runs the library's tests on Rust 1.85.
+
 ## [1.3.0] - 2026-05-20
 
 REPS-compliance release: closes the append-only-interner growth issue
@@ -355,7 +380,8 @@ existing call sites and the public API are identical to `1.0.0`.
 - Added benchmark guidance and CI notes to make performance regressions easier to spot
 - Added workflow badges and a health-signals note in the README for quick status visibility
 
-[Unreleased]: https://github.com/jamesgober/lang-lib/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/jamesgober/lang-lib/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/jamesgober/lang-lib/releases/tag/v1.3.1
 [1.3.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.3.0
 [1.2.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.2.0
 [1.1.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.1.0

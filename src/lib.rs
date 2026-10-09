@@ -80,7 +80,8 @@
 //! locale per request and passes it explicitly during translation.
 //! See `examples/axum_server.rs` for the same pattern inside a real HTTP
 //! handler using `axum`.
-//! See `examples/actix_server.rs` for the same pattern using `actix-web`.
+//! See `examples/web-actix/` for the same pattern using `actix-web` (a
+//! standalone example crate, so actix-web is never a lang-lib dependency).
 //! Locale names must be a single file stem such as `en`, `en-US`, or `pt_BR`.
 
 #![deny(missing_docs)]

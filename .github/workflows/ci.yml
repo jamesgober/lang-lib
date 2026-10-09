@@ -37,6 +37,39 @@ jobs:
       - name: Compile benchmark target
         run: cargo bench --bench performance --no-run
 
+      # The actix-web example is a standalone crate (examples/web-actix) so
+      # actix-web never enters lang-lib's dependency graph. It needs Rust
+      # 1.88, so it is checked here on stable and left out of the MSRV job.
+      - name: Check formatting (actix-web example)
+        run: cargo fmt --manifest-path examples/web-actix/Cargo.toml --check
+
+      - name: Run Clippy (actix-web example)
+        run: cargo clippy --manifest-path examples/web-actix/Cargo.toml -- -D warnings
+
+  msrv:
+    name: MSRV (Rust 1.85)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85"
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      # Edition 2024 uses the MSRV-aware resolver, so dependencies resolve
+      # to versions that support rust-version 1.85.
+      - name: Test all features
+        run: cargo test --all-features
+
+      - name: Test with no default features
+        run: cargo test --no-default-features
+
   cross-platform:
     name: Cross-Platform Validation (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -67,8 +100,8 @@ jobs:
       - name: Check axum example
         run: cargo check --example axum_server --features web-example-axum
 
-      - name: Check actix-web example
-        run: cargo check --example actix_server --features web-example-actix
+      - name: Check actix-web example (standalone crate)
+        run: cargo check --manifest-path examples/web-actix/Cargo.toml
 
       - name: Check hot-reload example
         run: cargo check --example hot_reload --features hot-reload

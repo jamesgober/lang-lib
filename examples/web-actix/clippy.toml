@@ -1,0 +1,4 @@
+# clippy configuration for the actix-web example crate.
+# Overrides the lang-lib clippy.toml one directory up, whose MSRV (1.85)
+# is lower than this crate's (1.88).
+msrv = "1.88"

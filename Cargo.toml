@@ -1,6 +1,6 @@
 [package]
 name        = "lang-lib"
-version     = "1.3.0"
+version     = "1.3.1"
 edition     = "2024"
 rust-version = "1.85"
 readme      = "README.md"
@@ -41,7 +41,11 @@ registry = ["dep:registry-io"]
 # change. Implies `registry` so consumers can react to reload events.
 hot-reload = ["dep:notify", "registry"]
 web-example-axum = ["dep:axum", "dep:tokio"]
-web-example-actix = ["dep:actix-web"]
+# Kept for compatibility; enables nothing. The actix-web example is now its
+# own crate in examples/web-actix (run it with
+# `cargo run --manifest-path examples/web-actix/Cargo.toml`), so actix-web is
+# never part of lang-lib's dependency graph.
+web-example-actix = []
 
 [dependencies]
 arc-swap = "1.7"
@@ -51,7 +55,6 @@ notify = { version = "6", optional = true }
 registry-io = { version = "1", optional = true }
 axum = { version = "0.8", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"], optional = true }
-actix-web = { version = "4", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
@@ -66,11 +69,6 @@ harness = false
 name = "axum_server"
 path = "examples/axum_server.rs"
 required-features = ["web-example-axum"]
-
-[[example]]
-name = "actix_server"
-path = "examples/actix_server.rs"
-required-features = ["web-example-actix"]
 
 [[example]]
 name = "hot_reload"

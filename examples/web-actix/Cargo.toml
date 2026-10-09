@@ -1,0 +1,24 @@
+# Standalone example: lang-lib in an actix-web handler.
+#
+# This crate lives outside lang-lib's own dependency graph on purpose, so
+# library users can never pull actix-web in. It needs Rust 1.88 (the
+# patched `time` that actix-web depends on); lang-lib itself stays on 1.85.
+#
+#   cargo run --manifest-path examples/web-actix/Cargo.toml
+
+[package]
+name = "lang-lib-example-actix"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[dependencies]
+lang-lib = { path = "../.." }
+# Only `macros` is needed. Leaving out the default `http2` feature keeps
+# `h2` out of the build; the example serves plain HTTP/1.1.
+actix-web = { version = "4.12", default-features = false, features = ["macros"] }
+
+# Not part of the lang-lib workspace; keeps this example's dependencies
+# out of lang-lib's lockfile.
+[workspace]

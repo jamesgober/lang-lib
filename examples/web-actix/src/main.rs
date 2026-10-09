@@ -1,7 +1,17 @@
+//! lang-lib in an `actix-web` handler, resolving the locale per request
+//! from `Accept-Language`.
+//!
+//! This example is its own crate so that actix-web never becomes a
+//! dependency of lang-lib. Run it from the repository root with:
+//!
+//! ```text
+//! cargo run --manifest-path examples/web-actix/Cargo.toml
+//! ```
+
 use actix_web::{App, HttpRequest, HttpResponse, HttpServer, Responder, get, http::header, web};
 use lang_lib::Translator;
 
-#[path = "common/mod.rs"]
+#[path = "../../common/mod.rs"]
 mod shared;
 
 #[derive(Clone)]
