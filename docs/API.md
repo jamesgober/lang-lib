@@ -1,6 +1,6 @@
 # lang-lib - API Reference
 
-> Authoritative reference for the public API of `lang-lib 1.3.1`.
+> Authoritative reference for the public API of `lang-lib 1.3.2`.
 > Mirrors the rustdoc on docs.rs. The surface listed here is **stable**;
 > see [Stability](#stability) below for the guarantee.
 
