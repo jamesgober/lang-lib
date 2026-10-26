@@ -66,7 +66,7 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 ```toml
 [dependencies]
-lang-lib = "1.3.1"
+lang-lib = "1.3.2"
 ```
 
 Optional features:
@@ -74,12 +74,12 @@ Optional features:
 ```toml
 [dependencies]
 # Subscribe to translation change events via registry-io.
-lang-lib = { version = "1.3.1", features = ["registry"] }
+lang-lib = { version = "1.3.2", features = ["registry"] }
 
 # Watch locale files on disk and reload automatically.
 # Implies `registry`. Switches value storage to Arc<str> so reloaded
 # files no longer leak — the trade-off is one alloc per translate call.
-lang-lib = { version = "1.3.1", features = ["hot-reload"] }
+lang-lib = { version = "1.3.2", features = ["hot-reload"] }
 ```
 
 ## Quick Start
