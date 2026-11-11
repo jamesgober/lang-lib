@@ -84,6 +84,7 @@
 //! standalone example crate, so actix-web is never a lang-lib dependency).
 //! Locale names must be a single file stem such as `en`, `en-US`, or `pt_BR`.
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(unused_must_use)]
