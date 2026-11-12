@@ -396,9 +396,6 @@ existing call sites and the public API are identical to `1.0.0`.
 - Dual licensing under `Apache-2.0 OR MIT`. `LICENSE` renamed to
   `LICENSE-APACHE`; `LICENSE-MIT` added.
 - Canonical `REPS.md` at the repo root (Rust Efficiency & Performance Standards).
-- `.dev/PROMPT.md`, `.dev/DIRECTIVES.md`, `.dev/ROADMAP.md` — project context,
-  engineering directives, and the production roadmap to `1.2.0`.
-- `.dev/release/v1.0.1.md` — internal release notes for this patch.
 - `docs/release-notes/v1.0.1.md` — public release note.
 - `rustfmt.toml`, `clippy.toml` — portfolio-standard tooling configuration.
 
