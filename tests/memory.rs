@@ -4,6 +4,7 @@
 //! same mutex so readings are not disturbed by other tests in this binary.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -14,12 +15,20 @@ struct Counting;
 static LIVE: AtomicIsize = AtomicIsize::new(0);
 static ALLOCS: AtomicUsize = AtomicUsize::new(0);
 
+thread_local! {
+    // Allocation counts only include the thread that set this, so the test
+    // harness printing results on another thread does not add noise.
+    static COUNT_ALLOCS: Cell<bool> = const { Cell::new(false) };
+}
+
 // SAFETY: forwards every call to the system allocator unchanged and only
 // updates two counters on the side.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let _ = LIVE.fetch_add(layout.size() as isize, Ordering::Relaxed);
-        let _ = ALLOCS.fetch_add(1, Ordering::Relaxed);
+        if COUNT_ALLOCS.try_with(Cell::get).unwrap_or(false) {
+            let _ = ALLOCS.fetch_add(1, Ordering::Relaxed);
+        }
         // SAFETY: same contract as the caller's.
         unsafe { System.alloc(layout) }
     }
@@ -129,12 +138,14 @@ fn test_fallback_miss_path_does_not_allocate() {
     let _g = guard();
     Lang::set_fallbacks(vec!["en".to_string(), "de".to_string()]);
     let _ = Lang::translate("no_such_key", Some("fr"), Some("x"));
+    COUNT_ALLOCS.with(|c| c.set(true));
     let start = ALLOCS.load(Ordering::Relaxed);
     for _ in 0..1000 {
         let v = Lang::translate("no_such_key", Some("fr"), Some("x"));
         let _ = std::hint::black_box(&v);
     }
     let n = ALLOCS.load(Ordering::Relaxed) - start;
+    COUNT_ALLOCS.with(|c| c.set(false));
     Lang::set_fallbacks(vec!["en".to_string()]);
-    assert!(n < 10, "1000 fallback misses made {n} heap allocations");
+    assert_eq!(n, 0, "1000 fallback misses made {n} heap allocations");
 }
