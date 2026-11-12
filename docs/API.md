@@ -74,9 +74,16 @@ impl Lang {
 
 `set_path` and `set_locale` accept any `AsRef<str>` — `&str`,
 `String`, `Cow<str>`, and `Path::display()` output all satisfy the
-bound. Each call interns the value into the process-wide pool
+bound. `set_path` interns the value into the process-wide pool
 exactly once; subsequent calls with the same string return the same
 `'static` reference.
+
+`set_locale` follows the same rules as `Translator::new` (below): a
+loaded, active, or fallback locale is reused, any other name is kept
+only if it is shaped like a locale identifier and the cap of 256
+distinct unloaded names has room, and anything else sets the active
+locale to `""`, which is never loaded, so lookups go to the fallback
+chain.
 
 `set_fallbacks` accepts `Vec<String>` and interns each element. The
 chain is checked in order when a key is missing in the requested
@@ -112,13 +119,26 @@ and reads from the supplied directory instead — useful when one
 locale lives in a different tree from the rest. `unload` removes a
 locale from the lookup table.
 
-Locale identifiers must be single file stems such as `en`, `en-US`,
-or `pt_BR`. Path separators and relative path components are
-rejected before any file access.
+Locale identifiers must be 1 to 64 ASCII bytes, start with a letter
+or digit, and contain only letters, digits, `-`, `_`, `.`, and `@`:
+`en`, `en-US`, `pt_BR`, `zh-Hant-TW`, `sr_RS@latin`, and
+`en_US.UTF-8` are all accepted. Anything else, including path
+separators, a trailing separator, spaces, and control characters, is
+rejected with `LangError::InvalidLocale` before any file access.
+
+Files larger than `Lang::max_file_size()` (16 MiB by default, change
+it with `Lang::set_max_file_size`) are rejected with `LangError::Io`
+before they are read. A parse error reports the line, column, and
+reason, never the file content.
 
 Loading the same locale a second time replaces its translations
 with a fresh load from disk. Under the `registry` feature this fires
 `ChangeKind::Reloaded`; the first load fires `ChangeKind::Loaded`.
+See [Memory model](#memory-model) for what a reload keeps.
+
+`Lang::watch` reloads only locales that are already loaded. A new
+`<locale>.toml` that appears in the watched directory is ignored
+until the application loads it.
 
 **Example:**
 
@@ -307,7 +327,7 @@ Lang::unwatch();
 
 ```rust
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Translator { /* interned locale */ }
+pub struct Translator { /* locale name */ }
 
 impl Translator {
     pub fn new(locale: impl AsRef<str>) -> Self;
@@ -324,8 +344,18 @@ impl Translator {
 
 A request-scoped translation helper that binds a locale once and
 forwards lookups to the global `Lang` store. The locale is held as a
-`&'static str` (interned), so `Translator` is `Copy` — passing it
-across function boundaries is a pointer copy.
+`&'static str`, so `Translator` is `Copy`: passing it across
+function boundaries is a pointer copy.
+
+The locale may come from outside input. A loaded, active, or
+fallback locale is reused as is, without taking a lock. Any other
+name is kept only if it is shaped like a locale identifier and fewer
+than 256 distinct unloaded names have been kept so far; otherwise
+the translator uses the locale `""`, which is never loaded, so every
+lookup goes to the fallback chain and `locale()` returns `""`. Memory
+stays bounded however many distinct names arrive. A translator made
+for a valid name before that locale is loaded still sees the
+translations once it is.
 
 **When to use:** request-driven services where locale is part of the
 input rather than process-global state. Using `Translator` instead
@@ -373,7 +403,7 @@ impl std::error::Error    for LangError { /* ... */ }
 | `Io`            | The locale file could not be read (missing, permission denied, etc.).                 |
 | `Parse`         | The file was read but is not valid TOML, or contained no string-typed top-level keys. |
 | `NotLoaded`     | A locale was looked up that had never been loaded (reserved; future use).             |
-| `InvalidLocale` | The locale identifier was rejected before file access (path separators, traversal).   |
+| `InvalidLocale` | The locale identifier was rejected before file access (not shaped like a locale).    |
 
 **Example:**
 
@@ -586,23 +616,36 @@ Code that explicitly typed `String` for the return needs
 `lang-lib` interns short strings (locale identifiers, translation
 keys, the configured path, fallback locale names) into a global
 append-only pool. Once interned, a string lives for the program's
-lifetime. The interner is bounded by the number of *unique* strings
-the application ever sees — typically a few hundred KB in real
-multi-locale apps.
+lifetime. Every path that can see outside input is bounded:
+
+- **Locale names.** `Lang::load` interns the names of locales it
+  loads (a file must exist for each). `Translator::new` and
+  `Lang::set_locale` intern a name that is not loaded only if it is
+  shaped like a locale identifier, and only up to 256 distinct names
+  per process; past that, the name maps to `""`.
+- **First loads.** The first load of each locale interns its keys
+  (and, in the default build, its values).
+- **Reloads.** A later load of the same locale reuses strings that
+  are already interned and interns new ones only within a 1 MiB
+  budget shared by every reload in the process. Past the budget, new
+  keys and values are reference counted and freed when the locale is
+  reloaded again or unloaded.
 
 **Translation values** use one of two storage strategies depending
 on the active feature set:
 
-- **Default builds** intern values too. The translate hit path
-  returns `Cow::Borrowed(&'static str)` — pure pointer copy, zero
-  allocation. Values are never reclaimed; this is correct because
-  the default build cannot reload locale data after startup, so the
-  interner cannot grow over time.
+- **Default builds** intern values as described above. The translate
+  hit path returns `Cow::Borrowed(&'static str)`, a pure pointer
+  copy with zero allocation. The exception is a value that a reload
+  added after the reload budget ran out: a hit on it returns
+  `Cow::Owned(String)`, one allocation per call, until the next
+  reload or unload frees it. Applications that reload rarely never
+  reach the budget.
 
 - **`hot-reload` builds** store values as `Arc<str>` instead. The
-  translate hit path returns `Cow::Owned(String)` — one allocation
+  translate hit path returns `Cow::Owned(String)`, one allocation
   per call, but reloading a locale drops the old `Arc<str>`
-  instances cleanly. No leak under reload churn.
+  instances cleanly. Keys follow the reload budget above.
 
 `Lang::translate_arc` (under `hot-reload`) returns the underlying
 `Arc<str>` directly — zero allocation per call at the cost of

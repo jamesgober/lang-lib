@@ -36,7 +36,7 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 - **Multi-Language Support** — Load any number of locales from plain TOML files and switch the active language at runtime. No fixed locale set, no recompile to add one.
 
-- **Zero-Allocation Lookups (default build)** — Translation values are interned at load time into a process-wide pool, and every successful lookup returns a `Cow::Borrowed(&'static str)` that points directly into that pool. The hot path costs zero heap allocations. Fallback and key-return paths also avoid allocation by borrowing from the caller's inputs.
+- **Zero-Allocation Lookups (default build)**: Translation values are interned at load time into a process-wide pool, and every successful lookup returns a `Cow::Borrowed(&'static str)` that points directly into that pool. The hot path costs zero heap allocations. Fallback and key-return paths also avoid allocation by borrowing from the caller's inputs. Reloads intern new strings only within a 1 MiB budget, so the pool stays bounded (see `docs/API.md`, Memory model).
 
 - **Lock-Free Reads** — Translation state is swapped atomically via `ArcSwap`. Concurrent lookups never take a lock and never contend, scaling cleanly across cores.
 
@@ -66,7 +66,7 @@ A simple, **lightweight** library with a **high-performance**, enterprise-ready 
 
 ```toml
 [dependencies]
-lang-lib = "1.3.2"
+lang-lib = "1.4.0"
 ```
 
 Optional features:
@@ -74,12 +74,12 @@ Optional features:
 ```toml
 [dependencies]
 # Subscribe to translation change events via registry-io.
-lang-lib = { version = "1.3.2", features = ["registry"] }
+lang-lib = { version = "1.4.0", features = ["registry"] }
 
 # Watch locale files on disk and reload automatically.
 # Implies `registry`. Switches value storage to Arc<str> so reloaded
 # files no longer leak — the trade-off is one alloc per translate call.
-lang-lib = { version = "1.3.2", features = ["hot-reload"] }
+lang-lib = { version = "1.4.0", features = ["hot-reload"] }
 ```
 
 ## Quick Start
@@ -220,7 +220,7 @@ use lang_lib::{resolve_accept_language, Lang};
 
 fn render_for_request(header: &str) -> String {
 	let locale = resolve_accept_language(header, &["en", "es"], "en");
-	Lang::translate("login_title", Some(locale), Some("Sign in"))
+	Lang::translate("login_title", Some(locale), Some("Sign in")).into_owned()
 }
 ```
 
@@ -239,7 +239,7 @@ use lang_lib::{resolve_accept_language, Lang};
 fn render_for_request(header: &str) -> String {
 	let locale = resolve_accept_language(header, &["en", "es"], "en");
 	let translator = Lang::translator(locale);
-	translator.translate_with_fallback("login_title", "Sign in")
+	translator.translate_with_fallback("login_title", "Sign in").into_owned()
 }
 ```
 
@@ -296,12 +296,12 @@ use lang_lib::{Lang, Translator};
 
 fn render_page(locale: &str) -> String {
 	let translator = Translator::new(locale);
-	translator.translate_with_fallback("dashboard_title", "Dashboard")
+	translator.translate_with_fallback("dashboard_title", "Dashboard").into_owned()
 }
 
 fn render_page_via_lang(locale: &str) -> String {
 	let translator = Lang::translator(locale);
-	translator.translate("dashboard_title")
+	translator.translate("dashboard_title").into_owned()
 }
 ```
 
@@ -418,7 +418,10 @@ match Lang::load("en") {
 ## Production Notes
 
 - File lookup is cross-platform and uses the platform's native path handling.
-- Locale loading rejects path traversal inputs such as `../en` or nested paths.
+- Locale names must be shaped like locale identifiers (ASCII letters, digits, `-`, `_`, `.`, `@`, at most 64 bytes), so path traversal inputs such as `../en`, `en/`, or nested paths are rejected before any file access.
+- Locale files over 16 MiB are rejected before they are read (`Lang::set_max_file_size` changes the limit), and parse errors report the line and column, never the file content.
+- `Translator::new` and `Lang::set_locale` are safe to call with request input: unknown names are capped, so they cannot grow memory without bound. Resolving against a fixed list with `resolve_accept_language` is still the recommended pattern.
+- Translations are returned exactly as written in the locale file. Treat them as untrusted text and escape them for the output context (HTML, SQL, shell) like any other input.
 - Internal state recovers from poisoned locks instead of panicking on future reads.
 - `Lang::loaded()` returns a sorted list for deterministic diagnostics and tests.
 

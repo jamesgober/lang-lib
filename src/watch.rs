@@ -4,7 +4,9 @@
 //! [`crate::Lang::watch`] starts a single background thread that subscribes
 //! to filesystem events for the configured locale directory, debounces
 //! rapid bursts (e.g. atomic-rename writes), and calls
-//! [`crate::Lang::load_from`] for each affected `<locale>.toml` file.
+//! [`crate::Lang::load_from`] for each affected `<locale>.toml` file whose
+//! locale is already loaded. Files for other locales are ignored, so a
+//! stray or temporary `*.toml` file in the directory is never loaded.
 //!
 //! Successful reloads fire a [`crate::ChangeKind::Reloaded`] event through
 //! the shared `registry-io` channel; missing files or parse failures fire
@@ -27,9 +29,8 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
 use crate::change::{ChangeKind, LangChangeEvent};
 use crate::error::LangError;
-use crate::intern::intern;
 use crate::registry::emit;
-use crate::store::Lang;
+use crate::store::{Lang, loaded_locale_key};
 
 /// Errors emitted by [`crate::Lang::watch`] when starting the watcher.
 #[derive(Debug)]
@@ -109,7 +110,12 @@ pub(crate) fn stop() {
     if let Some(mut state) = slot.take() {
         state.stop.store(true, Ordering::Relaxed);
         if let Some(handle) = state.handle.take() {
-            let _ = handle.join();
+            // A change handler running on the watcher thread may call
+            // `Lang::unwatch`. Joining the current thread would deadlock;
+            // the worker sees the stop flag and exits on its own.
+            if handle.thread().id() != thread::current().id() {
+                let _ = handle.join();
+            }
         }
     }
 }
@@ -172,6 +178,10 @@ fn reload(path: &std::path::Path, fallback_dir: &std::path::Path) {
     let Some(locale) = path.file_stem().and_then(|s| s.to_str()) else {
         return;
     };
+    // Only reload locales the application loaded itself.
+    let Some(locale_key) = loaded_locale_key(locale) else {
+        return;
+    };
     let dir = path.parent().unwrap_or(fallback_dir);
     let dir_str = dir.to_string_lossy();
     match Lang::load_from(locale, &dir_str) {
@@ -182,13 +192,13 @@ fn reload(path: &std::path::Path, fallback_dir: &std::path::Path) {
         Ok(()) | Err(LangError::NotLoaded { .. } | LangError::InvalidLocale { .. }) => {}
         Err(LangError::Io { .. }) => {
             emit(LangChangeEvent {
-                locale: intern(locale),
+                locale: locale_key,
                 kind: ChangeKind::FileMissing,
             });
         }
         Err(LangError::Parse { .. }) => {
             emit(LangChangeEvent {
-                locale: intern(locale),
+                locale: locale_key,
                 kind: ChangeKind::ParseFailed,
             });
         }
