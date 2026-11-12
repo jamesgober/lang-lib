@@ -186,3 +186,76 @@ fn unwatch_stops_event_delivery() {
 
     assert!(Lang::off_change(id));
 }
+
+#[test]
+fn watcher_ignores_files_for_locales_that_are_not_loaded() {
+    let _guard = test_guard();
+    reset_lang();
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_locale(&dir, "watch_d", "k = \"a\"");
+    let path_str = dir.path().to_str().expect("utf8 path").to_owned();
+    Lang::set_path(path_str.clone());
+    Lang::load("watch_d").expect("load");
+
+    Lang::watch(&path_str).expect("start watcher");
+    sleep(Duration::from_millis(200));
+    write_locale(&dir, "watch_stray", "k = \"stray\"");
+    write_locale(&dir, "watch_d", "k = \"b\"");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while Lang::translate("k", Some("watch_d"), None) != "b" {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "watcher did not reload the loaded locale"
+        );
+        sleep(Duration::from_millis(50));
+    }
+    // Give the stray file the same debounce window.
+    sleep(Duration::from_millis(300));
+    Lang::unwatch();
+
+    assert!(
+        !Lang::is_loaded("watch_stray"),
+        "a file for a locale that was never loaded must not be loaded by the watcher"
+    );
+}
+
+#[test]
+fn unwatch_from_a_change_handler_does_not_deadlock() {
+    let _guard = test_guard();
+    reset_lang();
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_locale(&dir, "watch_c", "k = \"a\"");
+    let path_str = dir.path().to_str().expect("utf8 path").to_owned();
+    Lang::set_path(path_str.clone());
+    Lang::load("watch_c").expect("load");
+
+    let returned = Arc::new(AtomicUsize::new(0));
+    let sink = Arc::clone(&returned);
+    let id = Lang::on_change(move |event| {
+        if event.locale == "watch_c" && event.kind == ChangeKind::Reloaded {
+            Lang::unwatch();
+            let _ = sink.fetch_add(1, Ordering::Relaxed);
+        }
+    });
+
+    Lang::watch(&path_str).expect("start watcher");
+    sleep(Duration::from_millis(200));
+    write_locale(&dir, "watch_c", "k = \"b\"");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while returned.load(Ordering::Relaxed) == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Lang::unwatch called from a change handler did not return"
+        );
+        sleep(Duration::from_millis(50));
+    }
+
+    // The watcher is stopped, so a new one can start.
+    Lang::watch(&path_str).expect("restart watcher");
+    Lang::unwatch();
+    assert!(Lang::off_change(id));
+}

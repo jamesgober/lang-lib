@@ -9,6 +9,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [1.4.0] - 2026-11-12
+
+Memory and input-handling fixes from an independent review. No public
+item is removed or renamed.
+
+### Fixed
+
+- `Translator::new`, `Lang::translator`, and `Lang::set_locale` no longer
+  keep every name they are given for the life of the process. A loaded,
+  active, or fallback locale is reused without taking a lock. Any other
+  name is kept only if it is shaped like a locale identifier and fewer
+  than 256 distinct unloaded names have been kept; past that, the name
+  maps to the empty locale `""`, which is never loaded, so lookups go to
+  the fallback chain. Before, 100,000 distinct names from request input
+  grew the heap by about 11 MB with nothing ever reclaimed.
+- Reloading a locale (`Lang::load` or `Lang::load_from` on a locale that
+  was loaded before) no longer leaks every changed key and value. Strings
+  that are already kept are reused, and new ones are kept only within a
+  1 MiB budget shared by all reloads in the process. Past the budget, new
+  keys and values are reference counted and freed on the next reload or
+  unload. In the default build a hit on such a value returns
+  `Cow::Owned` (one allocation); everything else stays zero-allocation.
+  The 1.3 documentation said the default build could not reload; it
+  could, and each reload leaked.
+- The `hot-reload` watcher reloads only locales that are already loaded.
+  A new or temporary `*.toml` file in the watched directory is no longer
+  loaded on its own. Load a new locale with `Lang::load` first.
+- Calling `Lang::unwatch` from a change handler no longer joins the
+  watcher thread from itself (a deadlock on Windows, a caught panic
+  elsewhere).
+- A miss that walks the fallback chain no longer allocates a `HashSet`
+  per call; duplicate fallbacks are skipped by checking the visited part
+  of the chain.
+- README examples that return `String` now call `.into_owned()`, so they
+  compile against the `Cow` return type.
+
+### Security
+
+- Locale names must be shaped like locale identifiers: 1 to 64 ASCII
+  bytes, starting with a letter or digit, then letters, digits, `-`, `_`,
+  `.`, or `@`. BCP 47 tags (`en-US`, `zh-Hant-TW`), underscore forms
+  (`pt_BR`), and POSIX names (`sr_RS@latin`, `en_US.UTF-8`) still load.
+  Names with a trailing separator (`en/`, which read `en/.toml` before),
+  spaces, control characters, or non-ASCII characters are now rejected
+  with `LangError::InvalidLocale`.
+- Locale files larger than 16 MiB are rejected with `LangError::Io`
+  before they are read. The limit can be changed with the new
+  `Lang::set_max_file_size` and read with `Lang::max_file_size`.
+- `LangError::Parse` now carries the line, column, and reason of a TOML
+  error, not the TOML crate's message, which quoted the offending line of
+  the file.
+- The README now says translations are returned as written and must be
+  escaped for their output context.
+
+### Added
+
+- `Lang::set_max_file_size(bytes: u64)` and `Lang::max_file_size()`.
+
+### Dependencies
+
+The default build depends on these third-party crates, unchanged in this
+release: `arc-swap`, `rustc-hash`, `toml`, and through `toml`: `toml_edit`,
+`toml_datetime`, `toml_write`, `serde`, `serde_core`, `serde_spanned`,
+`winnow`, `indexmap`, `hashbrown`, `equivalent` (plus the `rustversion`
+proc macro at build time). `hot-reload` adds `notify`. Reducing this list
+changes what the crate depends on and accepts, so it is planned for 2.0,
+together with moving the axum example out of the library's features.
+
 ## [1.3.2] - 2026-10-26
 
 ### Fixed
@@ -390,7 +458,8 @@ existing call sites and the public API are identical to `1.0.0`.
 - Added benchmark guidance and CI notes to make performance regressions easier to spot
 - Added workflow badges and a health-signals note in the README for quick status visibility
 
-[Unreleased]: https://github.com/jamesgober/lang-lib/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/jamesgober/lang-lib/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/jamesgober/lang-lib/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/jamesgober/lang-lib/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/jamesgober/lang-lib/releases/tag/v1.3.1
 [1.3.0]: https://github.com/jamesgober/lang-lib/releases/tag/v1.3.0

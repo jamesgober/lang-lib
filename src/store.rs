@@ -1,12 +1,11 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use arc_swap::{ArcSwap, Guard};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::error::LangError;
-use crate::intern::intern;
+use crate::intern::{Text, intern, intern_unloaded_locale};
 use crate::loader;
 #[cfg(feature = "registry")]
 use crate::{
@@ -21,12 +20,13 @@ use crate::{
 // Translation values use a different storage strategy depending on whether
 // the `hot-reload` feature is enabled:
 //
-// - **Default builds** store values as `&'static str` references handed out
-//   by the leak-based interner. Hit-path returns are
-//   `Cow::Borrowed(&'static str)` — pure pointer copies, no atomics, no
-//   allocation. Memory is never reclaimed; this is correct because the
-//   default build cannot reload locale files at runtime, so the interner
-//   cannot grow after startup.
+// - **Default builds** store values as `Text`. Values from the first load
+//   of a locale (and reloaded values while the interner's reload budget
+//   lasts) are interned `&'static str` references, so hit-path returns are
+//   `Cow::Borrowed(&'static str)`: pure pointer copies, no atomics, no
+//   allocation. Reloaded values past the budget are `Arc<str>`, freed on
+//   the next reload or unload, and a hit on one returns an owned copy. This
+//   bounds the interner's growth under repeated `Lang::load` calls.
 //
 // - **`hot-reload` builds** store values as `Arc<str>`. Hit-path returns are
 //   `Cow::Owned(arc.to_string())` — one allocation per call, but reloading
@@ -37,19 +37,19 @@ use crate::{
 
 /// Value-storage type used inside the per-locale map.
 ///
-/// `&'static str` in default builds (interner-backed, zero-alloc returns);
-/// `Arc<str>` in `hot-reload` builds (reclaims on reload).
+/// `Text` in default builds (interned where the budget allows, so most hits
+/// are zero-alloc); `Arc<str>` in `hot-reload` builds (reclaims on reload).
 #[cfg(not(feature = "hot-reload"))]
-pub(crate) type StoredValue = &'static str;
+pub(crate) type StoredValue = Text;
 
 /// Value-storage type used inside the per-locale map.
 ///
-/// `&'static str` in default builds (interner-backed, zero-alloc returns);
-/// `Arc<str>` in `hot-reload` builds (reclaims on reload).
+/// `Text` in default builds (interned where the budget allows, so most hits
+/// are zero-alloc); `Arc<str>` in `hot-reload` builds (reclaims on reload).
 #[cfg(feature = "hot-reload")]
 pub(crate) type StoredValue = Arc<str>;
 
-type LocaleMap = FxHashMap<&'static str, StoredValue>;
+type LocaleMap = FxHashMap<Text, StoredValue>;
 
 struct LangState {
     path: &'static str,
@@ -82,6 +82,77 @@ impl Clone for LangState {
 
 static STATE: OnceLock<ArcSwap<LangState>> = OnceLock::new();
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+/// Locale names that have loaded successfully at least once in this
+/// process. A later load of one of these is a reload, which interns new
+/// strings only within the interner's reload budget.
+static EVER_LOADED: OnceLock<Mutex<FxHashSet<&'static str>>> = OnceLock::new();
+
+fn ever_loaded() -> std::sync::MutexGuard<'static, FxHashSet<&'static str>> {
+    EVER_LOADED
+        .get_or_init(|| Mutex::new(FxHashSet::default()))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The locale name used for names that are rejected or over the cap. It is
+/// never a valid locale, so it is never loaded and every lookup through it
+/// goes straight to the fallback chain.
+const UNKNOWN_LOCALE: &str = "";
+
+/// Maps a caller-supplied locale name to a `&'static str` without letting
+/// outside input grow the interner without bound.
+///
+/// A loaded locale, the active locale, or a fallback reuses the stored
+/// name. Any other name is interned only if it is shaped like a locale and
+/// the cap on unloaded names has room; otherwise it maps to
+/// [`UNKNOWN_LOCALE`].
+fn resolve_locale(name: &str) -> &'static str {
+    let state = snapshot();
+    if let Some((&key, _)) = state.locales.get_key_value(name) {
+        return key;
+    }
+    if state.active == name {
+        return state.active;
+    }
+    if let Some(&fb) = state.fallbacks.iter().find(|&&fb| fb == name) {
+        return fb;
+    }
+    drop(state);
+    if !loader::is_locale_name(name) {
+        return UNKNOWN_LOCALE;
+    }
+    intern_unloaded_locale(name).unwrap_or(UNKNOWN_LOCALE)
+}
+
+/// Returns the stored name of a loaded locale.
+#[cfg(feature = "hot-reload")]
+pub(crate) fn loaded_locale_key(name: &str) -> Option<&'static str> {
+    snapshot().locales.get_key_value(name).map(|(&key, _)| key)
+}
+
+fn load_into(locale: &str, path: &str) -> Result<(), LangError> {
+    let first_load = !ever_loaded().contains(locale);
+    let map = loader::load_file(path, locale, first_load)?;
+    let interned_locale = intern(locale);
+    let _ = ever_loaded().insert(interned_locale);
+    let arc_map: Arc<LocaleMap> = Arc::new(map);
+    #[cfg(feature = "registry")]
+    let was_present = snapshot().locales.contains_key(interned_locale);
+    with_write(|state| {
+        let _ = state.locales.insert(interned_locale, Arc::clone(&arc_map));
+    });
+    #[cfg(feature = "registry")]
+    emit(LangChangeEvent {
+        locale: interned_locale,
+        kind: if was_present {
+            ChangeKind::Reloaded
+        } else {
+            ChangeKind::Loaded
+        },
+    });
+    Ok(())
+}
 
 fn state() -> &'static ArcSwap<LangState> {
     STATE.get_or_init(|| ArcSwap::new(Arc::new(LangState::initial())))
@@ -120,8 +191,8 @@ pub struct Lang;
 
 /// A lightweight, request-scoped translation helper.
 ///
-/// `Translator` stores an interned locale identifier and forwards lookups to
-/// the global [`Lang`] store without mutating the process-wide active locale.
+/// `Translator` stores a locale identifier and forwards lookups to the global
+/// [`Lang`] store without mutating the process-wide active locale.
 /// This makes it a good fit for web handlers, jobs, and other code paths
 /// where locale is part of the input rather than part of global application
 /// state.
@@ -147,14 +218,27 @@ pub struct Translator {
 
 impl Translator {
     /// Creates a translator bound to a specific locale.
+    ///
+    /// The locale may come from outside input, such as a path segment or a
+    /// cookie. A loaded locale, the active locale, or a fallback locale is
+    /// used as is. Any other name is kept only if it is shaped like a locale
+    /// identifier (see [`Lang::load`]) and fewer than 256 distinct unloaded
+    /// names have been kept so far; otherwise the translator uses the empty
+    /// locale, which is never loaded, so every lookup goes to the fallback
+    /// chain. This keeps memory bounded however many distinct names arrive.
+    ///
+    /// For request handling, prefer resolving the locale against a fixed
+    /// list first with [`crate::resolve_accept_language`].
     #[must_use]
     pub fn new(locale: impl AsRef<str>) -> Self {
         Self {
-            locale: intern(locale.as_ref()),
+            locale: resolve_locale(locale.as_ref()),
         }
     }
 
     /// Returns the locale used by this translator.
+    ///
+    /// This is the empty string when [`Translator::new`] rejected the name.
     #[must_use]
     pub fn locale(&self) -> &'static str {
         self.locale
@@ -241,7 +325,10 @@ impl Lang {
     /// Sets the active locale used when no locale is specified in `t!`.
     ///
     /// The locale does not need to be loaded before calling this, but
-    /// translations will be empty until it is.
+    /// translations will be empty until it is. Names follow the same rules
+    /// as [`Translator::new`]: a name that is not shaped like a locale, or
+    /// an unloaded name past the cap, sets the active locale to the empty
+    /// string, so lookups go to the fallback chain.
     ///
     /// This method is a good fit for single-user applications, CLIs, and
     /// startup-time configuration. In request-driven servers, prefer passing
@@ -255,8 +342,8 @@ impl Lang {
     /// Lang::set_locale("es");
     /// ```
     pub fn set_locale(locale: impl AsRef<str>) {
-        let interned = intern(locale.as_ref());
-        with_write(|state| state.active = interned);
+        let resolved = resolve_locale(locale.as_ref());
+        with_write(|state| state.active = resolved);
     }
 
     /// Returns the currently active locale.
@@ -299,13 +386,31 @@ impl Lang {
     /// Calling this a second time for the same locale replaces the existing
     /// translations with a fresh load from disk.
     ///
-    /// Locale names must be single file stems such as `en`, `en-US`, or
-    /// `pt_BR`. Path separators and relative path components are rejected.
+    /// Locale names must be shaped like locale identifiers: 1 to 64 ASCII
+    /// bytes, starting with a letter or digit, followed by letters, digits,
+    /// `-`, `_`, `.`, or `@` (for example `en`, `en-US`, `pt_BR`, or
+    /// `sr_RS@latin`). Anything else, including path separators, is
+    /// rejected before any file access.
+    ///
+    /// Files larger than [`Lang::max_file_size`] (16 MiB by default) are
+    /// rejected without being read.
+    ///
+    /// # Memory
+    ///
+    /// The first load of a locale keeps its keys and values for the life of
+    /// the process, which is what makes default-build lookups allocation
+    /// free. A later load of the same locale reuses strings that are already
+    /// kept and keeps new ones only within a 1 MiB budget shared by all
+    /// reloads in the process. Past the budget, new strings are freed when
+    /// the locale is reloaded again or unloaded, and in the default build a
+    /// hit on one of them returns an owned copy.
     ///
     /// # Errors
     ///
-    /// Returns [`LangError::Io`] if the file cannot be read, or
-    /// [`LangError::Parse`] if the TOML is invalid.
+    /// Returns [`LangError::InvalidLocale`] if the name is rejected,
+    /// [`LangError::Io`] if the file cannot be read or is over the size
+    /// limit, or [`LangError::Parse`] if the TOML is invalid. A parse error
+    /// gives the line, column, and reason, never the file content.
     ///
     /// # Examples
     ///
@@ -316,26 +421,8 @@ impl Lang {
     /// Lang::load("es").unwrap();
     /// ```
     pub fn load(locale: impl AsRef<str>) -> Result<(), LangError> {
-        let locale = locale.as_ref();
         let path = snapshot().path;
-        let map = loader::load_file(path, locale)?;
-        let interned_locale = intern(locale);
-        let arc_map: Arc<LocaleMap> = Arc::new(map);
-        #[cfg(feature = "registry")]
-        let was_present = snapshot().locales.contains_key(interned_locale);
-        with_write(|state| {
-            let _ = state.locales.insert(interned_locale, Arc::clone(&arc_map));
-        });
-        #[cfg(feature = "registry")]
-        emit(LangChangeEvent {
-            locale: interned_locale,
-            kind: if was_present {
-                ChangeKind::Reloaded
-            } else {
-                ChangeKind::Loaded
-            },
-        });
-        Ok(())
+        load_into(locale.as_ref(), path)
     }
 
     /// Loads a locale from a specific path, ignoring the global path setting.
@@ -355,25 +442,41 @@ impl Lang {
     /// Lang::load_from("en", "tests/fixtures/locales").unwrap();
     /// ```
     pub fn load_from(locale: impl AsRef<str>, path: &str) -> Result<(), LangError> {
-        let locale = locale.as_ref();
-        let map = loader::load_file(path, locale)?;
-        let interned_locale = intern(locale);
-        let arc_map: Arc<LocaleMap> = Arc::new(map);
-        #[cfg(feature = "registry")]
-        let was_present = snapshot().locales.contains_key(interned_locale);
-        with_write(|state| {
-            let _ = state.locales.insert(interned_locale, Arc::clone(&arc_map));
-        });
-        #[cfg(feature = "registry")]
-        emit(LangChangeEvent {
-            locale: interned_locale,
-            kind: if was_present {
-                ChangeKind::Reloaded
-            } else {
-                ChangeKind::Loaded
-            },
-        });
-        Ok(())
+        load_into(locale.as_ref(), path)
+    }
+
+    /// Sets the largest locale file, in bytes, that [`Lang::load`] and
+    /// [`Lang::load_from`] will read. Defaults to 16 MiB.
+    ///
+    /// A larger file is rejected with [`LangError::Io`] before it is read,
+    /// so a locale directory that others can write to cannot make a load
+    /// exhaust memory.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use lang_lib::Lang;
+    ///
+    /// Lang::set_max_file_size(4 * 1024 * 1024);
+    /// assert_eq!(Lang::max_file_size(), 4 * 1024 * 1024);
+    /// # Lang::set_max_file_size(16 * 1024 * 1024);
+    /// ```
+    pub fn set_max_file_size(bytes: u64) {
+        loader::set_max_file_size(bytes);
+    }
+
+    /// Returns the largest locale file, in bytes, that a load will read.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use lang_lib::Lang;
+    ///
+    /// assert!(Lang::max_file_size() > 0);
+    /// ```
+    #[must_use]
+    pub fn max_file_size() -> u64 {
+        loader::max_file_size()
     }
 
     /// Returns `true` if the locale has been loaded.
@@ -417,11 +520,9 @@ impl Lang {
     /// If either of those still references the removed locale, translation
     /// will simply skip it.
     ///
-    /// Note: in `1.1.x`, translation strings are interned into a process-wide
-    /// pool, so unloading a locale removes it from the lookup table but does
-    /// not reclaim the interned bytes themselves. The `1.2.x` hot-reload
-    /// milestone revisits this so long-running reloaders do not grow the
-    /// interner without bound.
+    /// Strings kept from the locale's first load stay in the process-wide
+    /// pool after unloading (see the memory notes on [`Lang::load`]);
+    /// strings held past the reload budget are freed.
     ///
     /// # Examples
     ///
@@ -434,14 +535,17 @@ impl Lang {
     /// ```
     pub fn unload(locale: &str) {
         #[cfg(feature = "registry")]
-        let was_present = snapshot().locales.contains_key(locale);
+        let present_key = snapshot()
+            .locales
+            .get_key_value(locale)
+            .map(|(&key, _)| key);
         with_write(|state| {
             let _ = state.locales.remove(locale);
         });
         #[cfg(feature = "registry")]
-        if was_present {
+        if let Some(key) = present_key {
             emit(LangChangeEvent {
-                locale: intern(locale),
+                locale: key,
                 kind: ChangeKind::Unloaded,
             });
         }
@@ -449,9 +553,10 @@ impl Lang {
 
     /// Creates a request-scoped [`Translator`] for the provided locale.
     ///
-    /// This is a convenience wrapper around [`Translator::new`]. It is most
-    /// useful in server code where locale is resolved per request and passed
-    /// through the handler stack.
+    /// This is a convenience wrapper around [`Translator::new`], with the
+    /// same rules for names that are not loaded. It is most useful in server
+    /// code where locale is resolved per request and passed through the
+    /// handler stack.
     ///
     /// # Examples
     ///
@@ -521,6 +626,14 @@ impl Lang {
     /// fires a [`crate::LangChangeEvent`] through the shared registry
     /// (`registry` feature is implied by `hot-reload`).
     ///
+    /// Only files for locales that are already loaded are reloaded. A new
+    /// `<locale>.toml` that appears in the directory is ignored until the
+    /// application loads that locale with [`Lang::load`] or
+    /// [`Lang::load_from`].
+    ///
+    /// A change handler may call [`Lang::unwatch`] from the watcher thread;
+    /// the watcher then stops after the current event.
+    ///
     /// Only one watcher may be active per process. Call [`Lang::unwatch`]
     /// before starting a new one.
     ///
@@ -569,7 +682,9 @@ impl Lang {
     /// 4. The key itself (never returns an empty string)
     ///
     /// The hot path is lock-free and zero-allocation: a hit returns
-    /// [`Cow::Borrowed`] backed by the interned translation store; a miss
+    /// [`Cow::Borrowed`] backed by the interned translation store (in the
+    /// default build, except for values a reload added past the reload
+    /// budget, which return [`Cow::Owned`]; see [`Lang::load`]); a miss
     /// with an inline fallback returns [`Cow::Borrowed`] of the user-supplied
     /// fallback; a complete miss returns [`Cow::Borrowed`] of the key.
     /// The returned value derefs to `&str` and works transparently with
@@ -605,9 +720,10 @@ impl Lang {
             }
         }
 
-        let mut seen = HashSet::with_capacity(state.fallbacks.len());
-        for &fb_locale in state.fallbacks.iter() {
-            if fb_locale == target || !seen.insert(fb_locale) {
+        // Fallback chains are a handful of entries, so checking the
+        // already-visited prefix is cheaper than a set and never allocates.
+        for (i, &fb_locale) in state.fallbacks.iter().enumerate() {
+            if fb_locale == target || state.fallbacks[..i].contains(&fb_locale) {
                 continue;
             }
             if let Some(map) = state.locales.get(fb_locale) {
@@ -661,9 +777,10 @@ impl Lang {
             }
         }
 
-        let mut seen = HashSet::with_capacity(state.fallbacks.len());
-        for &fb_locale in state.fallbacks.iter() {
-            if fb_locale == target || !seen.insert(fb_locale) {
+        // Fallback chains are a handful of entries, so checking the
+        // already-visited prefix is cheaper than a set and never allocates.
+        for (i, &fb_locale) in state.fallbacks.iter().enumerate() {
+            if fb_locale == target || state.fallbacks[..i].contains(&fb_locale) {
                 continue;
             }
             if let Some(map) = state.locales.get(fb_locale) {
@@ -679,20 +796,20 @@ impl Lang {
 
 /// Coerces the per-feature `StoredValue` into a `Cow<'a, str>`.
 ///
-/// Default build: pure pointer copy — the borrow's `'static` lifetime
-/// coerces to `'a` via covariance. Zero allocation.
+/// Default build: a pure pointer copy for interned values (the borrow's
+/// `'static` lifetime coerces to `'a`), and an owned copy for values a
+/// reload added past the reload budget.
 ///
 /// `hot-reload` build: allocates a new `String` from the `Arc<str>`'s
 /// bytes. Avoids touching the `Arc`'s refcount, so there is no contention
 /// when the same key is read from many threads simultaneously.
 #[cfg(not(feature = "hot-reload"))]
 #[inline]
-#[allow(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "same signature as the hot-reload variant, where StoredValue is Arc<str>"
-)]
 fn stored_to_cow<'a>(val: &StoredValue) -> Cow<'a, str> {
-    Cow::Borrowed(*val)
+    match val {
+        Text::Static(s) => Cow::Borrowed(s),
+        Text::Shared(s) => Cow::Owned(s.as_ref().to_owned()),
+    }
 }
 
 #[cfg(feature = "hot-reload")]

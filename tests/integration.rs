@@ -414,3 +414,114 @@ fn test_duplicate_fallbacks_do_not_change_resolution() {
 
     assert_eq!(Lang::translate("hello", None, None), "Hello");
 }
+
+// ---------------------------------------------------------------------------
+// Locale names from outside input
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_translator_created_before_load_sees_locale_after_load() {
+    let _guard = test_guard();
+    reset_lang();
+    let translator = Translator::new("de_early");
+    assert_eq!(translator.locale(), "de_early");
+    assert_eq!(translator.translate("title"), "title");
+
+    let dir = setup_temp_locales(&[("de_early", "title = \"Hallo\"")]);
+    Lang::load_from("de_early", dir.path().to_str().unwrap()).unwrap();
+
+    assert_eq!(translator.translate("title"), "Hallo");
+}
+
+#[test]
+fn test_translator_rejected_name_uses_fallback_chain() {
+    let _guard = test_guard();
+    reset_lang();
+    let dir = setup_temp_locales(&[("en", "title = \"Hello\"")]);
+    Lang::load_from("en", dir.path().to_str().unwrap()).unwrap();
+
+    for name in ["../en", "en/", "not a locale", "<script>"] {
+        let translator = Translator::new(name);
+        assert_eq!(translator.locale(), "", "{name:?}");
+        assert_eq!(translator.translate("title"), "Hello", "{name:?}");
+    }
+}
+
+#[test]
+fn test_set_locale_rejected_name_uses_fallback_chain() {
+    let _guard = test_guard();
+    reset_lang();
+    let dir = setup_temp_locales(&[("en", "title = \"Hello\"")]);
+    Lang::load_from("en", dir.path().to_str().unwrap()).unwrap();
+
+    Lang::set_locale("bad locale");
+    assert_eq!(Lang::locale(), "");
+    assert_eq!(Lang::translate("title", None, None), "Hello");
+    Lang::set_locale("en");
+}
+
+#[test]
+fn test_load_rejects_trailing_separator_and_odd_names() {
+    let _guard = test_guard();
+    reset_lang();
+    let dir = setup_temp_locales(&[("en", "k = \"top\"")]);
+    std::fs::create_dir(dir.path().join("en")).unwrap();
+    std::fs::write(dir.path().join("en").join(".toml"), "k = \"nested\"").unwrap();
+    let path = dir.path().to_str().unwrap();
+
+    for name in ["en/", "en\\", "en us", ""] {
+        let err = Lang::load_from(name, path).unwrap_err();
+        assert!(
+            matches!(err, lang_lib::LangError::InvalidLocale { .. }),
+            "{name:?}: {err}"
+        );
+    }
+}
+
+#[test]
+fn test_load_accepts_posix_locale_names() {
+    let _guard = test_guard();
+    reset_lang();
+    let dir = setup_temp_locales(&[("sr_RS@latin", "k = \"v\""), ("en_US.UTF-8", "k = \"w\"")]);
+    let path = dir.path().to_str().unwrap();
+    Lang::load_from("sr_RS@latin", path).unwrap();
+    Lang::load_from("en_US.UTF-8", path).unwrap();
+    assert_eq!(Lang::translate("k", Some("sr_RS@latin"), None), "v");
+    assert_eq!(Lang::translate("k", Some("en_US.UTF-8"), None), "w");
+}
+
+// ---------------------------------------------------------------------------
+// Hostile locale files
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_parse_error_does_not_echo_file_content() {
+    let _guard = test_guard();
+    reset_lang();
+    let dir = setup_temp_locales(&[("secret", "password = hunter2-not-quoted\n")]);
+    let err = Lang::load_from("secret", dir.path().to_str().unwrap()).unwrap_err();
+    let text = err.to_string();
+    assert!(!text.contains("hunter2"), "{text}");
+    assert!(text.contains("line 1"), "{text}");
+}
+
+#[test]
+fn test_oversized_file_is_rejected_before_reading() {
+    let _guard = test_guard();
+    reset_lang();
+    let dir = setup_temp_locales(&[("big", &format!("k = \"{}\"", "x".repeat(4096)))]);
+    let path = dir.path().to_str().unwrap();
+
+    let default_limit = Lang::max_file_size();
+    Lang::set_max_file_size(1024);
+    let result = Lang::load_from("big", path);
+    Lang::set_max_file_size(default_limit);
+
+    let err = result.unwrap_err();
+    assert!(matches!(err, lang_lib::LangError::Io { .. }), "{err}");
+    assert!(err.to_string().contains("1024-byte limit"), "{err}");
+    assert!(!Lang::is_loaded("big"));
+
+    Lang::load_from("big", path).unwrap();
+    assert!(Lang::is_loaded("big"));
+}
